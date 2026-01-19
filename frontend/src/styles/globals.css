@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-text-primary;
+  }
+
+  * {
+    @apply border-gray-200;
+  }
+}
+
+@layer components {
+  /* 卡片基础样式 */
+  .card {
+    @apply bg-surface rounded-2xl shadow-soft p-4;
+  }
+
+  .card-elevated {
+    @apply bg-surface rounded-2xl shadow-medium p-4;
+  }
+
+  /* 按钮样式 */
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-xl font-medium transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary-400 text-white hover:bg-primary-500 active:bg-primary-600;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-100 text-text-primary hover:bg-gray-200 active:bg-gray-300;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-text-secondary hover:bg-gray-100 active:bg-gray-200;
+  }
+
+  /* 输入框样式 */
+  .input {
+    @apply w-full px-4 py-3 rounded-xl border border-gray-200 bg-white
+           placeholder:text-text-muted
+           focus:outline-none focus:ring-2 focus:ring-primary-400/20 focus:border-primary-400
+           transition-all duration-200;
+  }
+
+  /* 状态指示器 */
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full;
+  }
+
+  .status-pending {
+    @apply status-dot bg-gray-300;
+  }
+
+  .status-running {
+    @apply status-dot bg-secondary-400 animate-pulse-soft;
+  }
+
+  .status-completed {
+    @apply status-dot bg-success-400;
+  }
+
+  .status-failed {
+    @apply status-dot bg-error-400;
+  }
+}
+
+@layer utilities {
+  /* 滚动条样式 */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.gray.300') transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: theme('colors.gray.300');
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: theme('colors.gray.400');
+  }
+
+  /* 隐藏滚动条但保持可滚动 */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* 毛玻璃效果 */
+  .glass {
+    @apply bg-white/80 backdrop-blur-xl;
+  }
+
+  /* 渐变边框 */
+  .gradient-border {
+    background: linear-gradient(white, white) padding-box,
+                linear-gradient(135deg, theme('colors.primary.400'), theme('colors.secondary.400')) border-box;
+    border: 1px solid transparent;
+  }
+}
