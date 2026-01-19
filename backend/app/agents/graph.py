@@ -83,7 +83,11 @@ _checkpointer_instance = None
 
 
 def get_checkpointer() -> BaseCheckpointSaver:
-    """获取 Checkpointer 实例"""
+    """获取 Checkpointer 实例
+
+    - 开发环境：使用内存存储 (InMemorySaver)
+    - 生产环境：使用 Redis 存储 (RedisSaver)
+    """
     global _checkpointer_instance
 
     if _checkpointer_instance is None:
@@ -93,10 +97,13 @@ def get_checkpointer() -> BaseCheckpointSaver:
             # 开发环境使用内存存储
             _checkpointer_instance = InMemorySaver()
         else:
-            # 生产环境可使用 Redis 或 PostgreSQL
-            # from langgraph.checkpoint.redis import RedisSaver
-            # _checkpointer_instance = RedisSaver.from_conn_string(settings.redis_url)
-            _checkpointer_instance = InMemorySaver()
+            # 生产环境使用 Redis
+            try:
+                from langgraph.checkpoint.redis import RedisSaver
+                _checkpointer_instance = RedisSaver.from_conn_string(settings.redis_url)
+            except ImportError:
+                # 如果 Redis 不可用，回退到内存存储
+                _checkpointer_instance = InMemorySaver()
 
     return _checkpointer_instance
 

@@ -20,11 +20,8 @@ class Settings(BaseSettings):
     mysql_password: str = ""
     mysql_database: str = "wins_agent"
 
-    # Redis 配置
+    # Redis 配置 (用于 Checkpoint 持久化)
     redis_url: str = "redis://localhost:6379"
-
-    # PostgreSQL 配置 (Checkpoint)
-    postgres_url: str = "postgresql://user:password@localhost:5432/langgraph"
 
     # FAISS 配置
     faiss_index_path: str = "./data/faiss_index"
@@ -43,7 +40,13 @@ class Settings(BaseSettings):
 
     @property
     def mysql_url(self) -> str:
+        """同步 MySQL URL"""
         return f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+
+    @property
+    def mysql_async_url(self) -> str:
+        """异步 MySQL URL"""
+        return f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
 
     class Config:
         env_file = ".env"
