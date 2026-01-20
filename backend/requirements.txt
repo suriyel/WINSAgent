@@ -6,6 +6,7 @@
 # LangChain / LangGraph Core
 # ---------------------------------
 langchain>=1.2.6,<2.0.0
+langchain-community>=0.3.0,<1.0.0
 langgraph>=1.0.6,<2.0.0
 
 # LLM Integrations

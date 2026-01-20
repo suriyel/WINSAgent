@@ -65,10 +65,8 @@ def build_agent_graph(
     builder.add_edge("executor", "supervisor")
     builder.add_edge("validator", END)
 
-    # 编译
-    compile_kwargs = {
-        "recursion_limit": settings.recursion_limit,
-    }
+    # 编译参数
+    compile_kwargs = {}
 
     if checkpointer:
         compile_kwargs["checkpointer"] = checkpointer
