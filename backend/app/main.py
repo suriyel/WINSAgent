@@ -19,6 +19,16 @@ async def lifespan(app: FastAPI):
     print(f"📍 API 地址: http://{settings.api_host}:{settings.api_port}")
     print(f"🔧 调试模式: {settings.debug}")
 
+    # 初始化工具
+    from app.tools.base import get_default_tools
+    tools = get_default_tools()
+    print(f"🔧 已注册 {len(tools)} 个工具")
+
+    # 初始化 Agent Graph
+    from app.agents.graph import get_agent_graph
+    get_agent_graph(tools)
+    print("🤖 Agent Graph 初始化完成")
+
     yield
 
     # 关闭时

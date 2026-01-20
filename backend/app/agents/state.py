@@ -19,6 +19,7 @@ class TodoStep(TypedDict):
     error: str | None
     depends_on: list[str]
     progress: int
+    retry_count: int  # 重试次数
 
 
 class PendingConfigField(TypedDict):
@@ -102,4 +103,5 @@ def create_todo_step(
         error=None,
         depends_on=depends_on or [],
         progress=0,
+        retry_count=0,
     )

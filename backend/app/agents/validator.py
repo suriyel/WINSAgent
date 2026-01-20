@@ -3,23 +3,104 @@ Validator SubGraph - 结果校验Agent
 负责：结果判定、错误归因、状态说明
 """
 
-from langchain_core.messages import SystemMessage, AIMessage
+import json
+import re
+from typing import Any
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 
-from .state import AgentState
+from .state import AgentState, TodoStep
 from .llm import get_llm
 
 
 VALIDATOR_SYSTEM_PROMPT = """你是一个专业的结果校验专家。你的职责是：
-1. 验证任务执行结果是否符合预期
+1. 验证任务执行结果是否符合用户的原始需求
 2. 识别失败原因并定位到具体步骤
-3. 使用业务语言生成状态说明
+3. 生成用户友好的执行总结
 
-请检查任务执行结果，并给出以下判断：
-1. 整体执行状态：成功/失败/部分成功
-2. 如有失败，说明具体原因和建议
-3. 生成用户可理解的执行总结
+## 执行统计
+{stats}
+
+## 步骤执行详情
+{step_details}
+
+## 原始用户需求
+请基于对话历史回顾用户的原始需求。
+
+## 输出要求
+请生成一份执行总结报告，包含：
+1. **执行结果**: 成功/部分成功/失败
+2. **完成情况**: 简要说明完成了什么
+3. **问题分析**: 如有失败，分析原因
+4. **建议**: 如有需要，给出后续建议
+
+使用清晰简洁的语言，避免技术术语，让用户容易理解。
 """
+
+
+def build_step_details(todo_list: list[TodoStep]) -> str:
+    """构建步骤执行详情"""
+    details = []
+    for i, step in enumerate(todo_list, 1):
+        status_icon = {
+            "completed": "✅",
+            "failed": "❌",
+            "running": "🔄",
+            "pending": "⏳",
+        }.get(step["status"], "❓")
+
+        detail = f"{i}. {status_icon} {step['description']}"
+
+        if step.get("result"):
+            # 截取结果摘要
+            result = step["result"]
+            if len(result) > 200:
+                result = result[:200] + "..."
+            detail += f"\n   结果: {result}"
+
+        if step.get("error"):
+            detail += f"\n   错误: {step['error']}"
+
+        details.append(detail)
+
+    return "\n".join(details)
+
+
+def analyze_failures(todo_list: list[TodoStep]) -> dict[str, Any]:
+    """分析失败步骤"""
+    failures = []
+    for step in todo_list:
+        if step["status"] == "failed":
+            failures.append({
+                "step_id": step["id"],
+                "description": step["description"],
+                "error": step.get("error", "未知错误"),
+                "tool_name": step.get("tool_name"),
+            })
+
+    # 错误分类
+    error_categories = {}
+    for f in failures:
+        error = f["error"]
+        if "timeout" in error.lower():
+            category = "超时"
+        elif "not found" in error.lower() or "不存在" in error:
+            category = "资源不存在"
+        elif "permission" in error.lower() or "权限" in error:
+            category = "权限问题"
+        elif "connection" in error.lower() or "连接" in error:
+            category = "连接问题"
+        else:
+            category = "其他"
+
+        if category not in error_categories:
+            error_categories[category] = []
+        error_categories[category].append(f)
+
+    return {
+        "failures": failures,
+        "error_categories": error_categories,
+    }
 
 
 def validator_node(state: AgentState) -> dict:
@@ -28,56 +109,76 @@ def validator_node(state: AgentState) -> dict:
 
     todo_list = state.get("todo_list", [])
     error_info = state.get("error_info")
+    parsed_intent = state.get("parsed_intent", "")
 
     # 统计执行结果
     completed = sum(1 for s in todo_list if s["status"] == "completed")
     failed = sum(1 for s in todo_list if s["status"] == "failed")
+    pending = sum(1 for s in todo_list if s["status"] == "pending")
+    running = sum(1 for s in todo_list if s["status"] == "running")
     total = len(todo_list)
 
-    # 构建校验消息
-    status_summary = f"""
-任务执行统计：
-- 总步骤数：{total}
+    # 构建统计信息
+    stats = f"""- 总步骤数：{total}
 - 已完成：{completed}
 - 失败：{failed}
+- 进行中：{running}
+- 待执行：{pending}"""
 
-步骤详情：
-"""
-    for step in todo_list:
-        status_icon = {
-            "completed": "✅",
-            "failed": "❌",
-            "running": "🔄",
-            "pending": "⏳",
-        }.get(step["status"], "❓")
-        status_summary += f"{status_icon} {step['description']}"
-        if step.get("error"):
-            status_summary += f" - 错误: {step['error']}"
-        status_summary += "\n"
+    # 构建步骤详情
+    step_details = build_step_details(todo_list)
+
+    # 如果有失败，添加失败分析
+    if failed > 0:
+        failure_analysis = analyze_failures(todo_list)
+        step_details += "\n\n## 失败分析\n"
+        for category, items in failure_analysis["error_categories"].items():
+            step_details += f"- {category}: {len(items)} 个步骤\n"
 
     if error_info:
-        status_summary += f"\n错误信息：{error_info}"
+        step_details += f"\n系统错误：{error_info}"
+
+    # 构建系统提示
+    system_prompt = VALIDATOR_SYSTEM_PROMPT.format(
+        stats=stats,
+        step_details=step_details,
+    )
 
     messages = [
-        SystemMessage(content=VALIDATOR_SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt),
         *state["messages"],
-        SystemMessage(content=status_summary),
+        HumanMessage(content="请对以上任务执行结果进行验证和总结。"),
     ]
 
     response = llm.invoke(messages)
 
     # 判定最终状态
-    if failed > 0:
+    if failed > 0 and completed == 0:
         final_status = "failed"
-    elif completed == total:
+    elif failed > 0 and completed > 0:
+        # 部分成功也标记为 failed，但在消息中说明
+        final_status = "failed"
+    elif completed == total and total > 0:
         final_status = "success"
-    else:
+    elif pending > 0 or running > 0:
         final_status = "running"
+    else:
+        final_status = "success"
+
+    # 构建最终消息
+    status_label = {
+        "success": "✅ 任务完成",
+        "failed": "❌ 任务失败" if completed == 0 else "⚠️ 部分完成",
+        "running": "🔄 执行中",
+    }.get(final_status, "❓ 未知状态")
+
+    final_message = f"**{status_label}**\n\n{response.content}"
 
     return {
-        "messages": [AIMessage(content=response.content)],
+        "messages": [AIMessage(content=final_message)],
         "final_status": final_status,
         "current_agent": "validator",
+        "pending_config": None,  # 清除待处理配置
     }
 
 

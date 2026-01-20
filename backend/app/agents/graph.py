@@ -15,6 +15,7 @@ from .planner import planner_node
 from .executor import executor_node
 from .validator import validator_node
 from app.config import get_settings
+from app.tools.base import get_default_tools
 
 
 def build_agent_graph(
@@ -112,7 +113,7 @@ def get_agent_graph(tools: list[BaseTool] | None = None) -> StateGraph:
     """获取 Agent Graph 单例
 
     Args:
-        tools: 可用的工具列表
+        tools: 可用的工具列表，如果为 None 则使用默认工具
 
     Returns:
         编译后的 StateGraph
@@ -120,6 +121,10 @@ def get_agent_graph(tools: list[BaseTool] | None = None) -> StateGraph:
     global _graph_instance
 
     if _graph_instance is None:
+        # 如果没有提供工具，使用默认工具
+        if tools is None:
+            tools = get_default_tools()
+
         checkpointer = get_checkpointer()
         _graph_instance = build_agent_graph(tools, checkpointer)
 
