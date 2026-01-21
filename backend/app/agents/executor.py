@@ -198,18 +198,17 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
             "values": {},
         }
 
-        # 先更新 state，再触发中断
-        result = {
+        print(f"[EXECUTOR] Setting pending_config for step {step_id}")
+        print(f"[EXECUTOR] pending_config_data: {pending_config_data}")
+
+        # 直接返回状态更新，不使用 interrupt()
+        # 改用 final_status = "waiting_input" 来标记需要用户输入
+        return {
             "todo_list": updated_list,
             "pending_config": pending_config_data,
             "final_status": "waiting_input",
             "current_agent": "executor",
         }
-
-        # 触发中断（不传递数据，数据已在 state 中）
-        interrupt("waiting_for_user_input")
-
-        return result
 
     # 如果指定了工具，直接调用
     if tool_name:

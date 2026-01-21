@@ -13,14 +13,21 @@ interface ConfigModalProps {
 export function ConfigModal({ config, onSubmit, onCancel }: ConfigModalProps) {
   const [values, setValues] = useState<Record<string, unknown>>({})
 
+  // 调试日志
+  useEffect(() => {
+    console.log('[ConfigModal] Config changed:', config)
+  }, [config])
+
   // 初始化默认值
   useEffect(() => {
     if (config) {
+      console.log('[ConfigModal] Initializing values for config:', config)
       const defaults: Record<string, unknown> = {}
       config.fields.forEach((field) => {
         defaults[field.name] = config.values[field.name] ?? field.default ?? ''
       })
       setValues(defaults)
+      console.log('[ConfigModal] Initialized values:', defaults)
     }
   }, [config])
 

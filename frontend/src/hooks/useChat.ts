@@ -83,6 +83,7 @@ export function useChat() {
 
           try {
             const event = JSON.parse(data)
+            console.log('[SSE] Raw event:', event)
 
             // 保存 thread_id
             if (event.thread_id && !currentThreadId) {
@@ -104,13 +105,32 @@ export function useChat() {
                 if (event.data?.status) {
                   setTaskStatus(event.data.status)
                 }
+                // 检查 pending_config（可能在 update 事件中）
+                if (event.data?.pending_config) {
+                  console.log('[SSE] Received pending_config in update:', event.data.pending_config)
+                  setPendingConfig(event.data.pending_config)
+                  setTaskStatus('waiting_input')
+                }
                 break
 
               case 'interrupt':
+                console.log('[SSE] Interrupt event received:', event)
+                console.log('[SSE] Event.data:', event.data)
+                console.log('[SSE] Event.data type:', typeof event.data)
+                console.log('[SSE] Event.data keys:', event.data ? Object.keys(event.data) : 'null/undefined')
+                console.log('[SSE] pending_config exists?', event.data?.pending_config)
+
                 // 处理中断
                 if (event.data?.pending_config) {
+                  console.log('[SSE] Setting pending_config:', event.data.pending_config)
                   setPendingConfig(event.data.pending_config)
                   setTaskStatus('waiting_input')
+                } else {
+                  console.error('[SSE] No pending_config in event.data!')
+                }
+
+                if (event.data?.todo_list) {
+                  setTodoList(event.data.todo_list)
                 }
                 break
 
@@ -165,8 +185,12 @@ export function useChat() {
   // 提交配置
   const submitConfig = useCallback(
     async (values: Record<string, unknown>) => {
-      if (!threadId) return
+      if (!threadId) {
+        console.error('[submitConfig] No threadId')
+        return
+      }
 
+      console.log('[submitConfig] Submitting values:', values, 'for thread:', threadId)
       setIsLoading(true)
       setPendingConfig(null)
 
@@ -177,18 +201,23 @@ export function useChat() {
           body: JSON.stringify(values),
         })
 
+        console.log('[submitConfig] Response status:', response.status)
+
         if (!response.ok) {
+          const errorText = await response.text()
+          console.error('[submitConfig] Error response:', errorText)
           throw new Error('Failed to submit config')
         }
 
         const data: ChatResponse = await response.json()
+        console.log('[submitConfig] Response data:', data)
 
         addMessage(data.message)
         setTodoList(data.todo_list)
         setTaskStatus(data.task_status)
         setPendingConfig(data.pending_config || null)
       } catch (error) {
-        console.error('Submit config error:', error)
+        console.error('[submitConfig] Error:', error)
       } finally {
         setIsLoading(false)
       }
