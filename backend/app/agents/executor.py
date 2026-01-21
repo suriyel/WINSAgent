@@ -12,6 +12,7 @@ from langgraph.types import interrupt
 
 from .state import AgentState, TodoStep, PendingConfigField
 from .llm import get_llm, get_llm_with_tools
+from .context_manager import get_context_manager
 from app.tools.base import ToolRegistry
 from app.config import get_settings
 
@@ -179,32 +180,36 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
 
     # 处理用户输入请求
     if tool_name == "user_input":
-        interrupt({
-            "action": "request_input",
+        # 构建待配置的内容
+        pending_config_data = {
             "step_id": step_id,
-            "message": current_step["description"],
-        })
-        return {
+            "title": "需要您的输入",
+            "description": current_step["description"],
+            "fields": [PendingConfigField(
+                name="user_response",
+                label="您的回答",
+                field_type="textarea",
+                required=True,
+                default=None,
+                options=None,
+                placeholder="请输入您的回答...",
+                description=current_step["description"],
+            )],
+            "values": {},
+        }
+
+        # 先更新 state，再触发中断
+        result = {
             "todo_list": updated_list,
-            "pending_config": {
-                "step_id": step_id,
-                "title": "需要您的输入",
-                "description": current_step["description"],
-                "fields": [PendingConfigField(
-                    name="user_response",
-                    label="您的回答",
-                    field_type="textarea",
-                    required=True,
-                    default=None,
-                    options=None,
-                    placeholder="请输入您的回答...",
-                    description=current_step["description"],
-                )],
-                "values": {},
-            },
+            "pending_config": pending_config_data,
             "final_status": "waiting_input",
             "current_agent": "executor",
         }
+
+        # 触发中断（不传递数据，数据已在 state 中）
+        interrupt("waiting_for_user_input")
+
+        return result
 
     # 如果指定了工具，直接调用
     if tool_name:
@@ -250,11 +255,15 @@ def execute_tool_with_llm(
         tools_info=ctx.get_tools_info(),
     )
 
+    # 使用上下文管理器优化消息历史
+    context_mgr = get_context_manager(settings.message_token_limit)
+    optimized_messages = context_mgr.optimize_context(state)
+
     # 使用 LLM 绑定工具
     llm = get_llm_with_tools([tool])
     messages = [
         SystemMessage(content=system_prompt),
-        *state["messages"],
+        *optimized_messages,
         HumanMessage(content=f"请执行步骤：{step['description']}"),
     ]
 
@@ -351,10 +360,14 @@ def execute_with_tool_selection(
         tools_info=ctx.get_tools_info(),
     )
 
+    # 使用上下文管理器优化消息历史
+    context_mgr = get_context_manager(settings.message_token_limit)
+    optimized_messages = context_mgr.optimize_context(state)
+
     llm = get_llm_with_tools(ctx.tools)
     messages = [
         SystemMessage(content=system_prompt),
-        *state["messages"],
+        *optimized_messages,
         HumanMessage(content=f"请执行步骤：{step['description']}。如果需要，请选择合适的工具。"),
     ]
 
@@ -413,12 +426,17 @@ def execute_without_tools(
     todo_list: list[TodoStep],
 ) -> dict:
     """不使用工具，直接使用 LLM 完成步骤"""
+    settings = get_settings()
     step_id = step["id"]
     llm = get_llm()
 
+    # 使用上下文管理器优化消息历史
+    context_mgr = get_context_manager(settings.message_token_limit)
+    optimized_messages = context_mgr.optimize_context(state)
+
     messages = [
         SystemMessage(content="你是一个专业的任务执行助手，请根据上下文完成指定的任务步骤。"),
-        *state["messages"],
+        *optimized_messages,
         HumanMessage(content=f"请完成以下步骤：{step['description']}"),
     ]
 

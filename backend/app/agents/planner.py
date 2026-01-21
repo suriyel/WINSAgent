@@ -13,7 +13,9 @@ from langgraph.graph import StateGraph, START, END
 
 from .state import AgentState, TodoStep, create_todo_step
 from .llm import get_llm
+from .context_manager import get_context_manager
 from app.tools.base import ToolRegistry
+from app.config import get_settings
 
 
 class TaskStep(BaseModel):
@@ -110,16 +112,21 @@ def parse_plan_response(content: str) -> dict[str, Any] | None:
 
 def planner_node(state: AgentState) -> dict:
     """Planner 节点 - 解析意图并生成 TODO 列表"""
+    settings = get_settings()
     llm = get_llm()
 
     # 获取可用工具描述
     tools_desc = get_available_tools_description()
     system_prompt = PLANNER_SYSTEM_PROMPT.format(tools=tools_desc)
 
+    # 使用上下文管理器优化消息历史
+    context_mgr = get_context_manager(settings.message_token_limit)
+    optimized_messages = context_mgr.optimize_context(state)
+
     # 构建消息
     messages = [
         SystemMessage(content=system_prompt),
-        *state["messages"],
+        *optimized_messages,
         HumanMessage(
             content="请分析上述用户需求，按照指定的JSON格式生成任务规划。"
         ),

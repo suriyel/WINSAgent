@@ -24,7 +24,7 @@ export function useChat() {
     reset,
   } = useChatStore()
 
-  // 发送消息
+  // 发送消息（使用 SSE 流式传输）
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return
 
@@ -34,17 +34,19 @@ export function useChat() {
       timestamp: new Date().toISOString(),
     }
 
+    const messageToSend = inputValue
+
     // 添加用户消息
     addMessage(userMessage)
     setInputValue('')
     setIsLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE}/chat/send`, {
+      const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: inputValue,
+          message: messageToSend,
           thread_id: threadId,
         }),
       })
@@ -53,14 +55,90 @@ export function useChat() {
         throw new Error('Failed to send message')
       }
 
-      const data: ChatResponse = await response.json()
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
 
-      // 更新状态
-      setThreadId(data.thread_id)
-      addMessage(data.message)
-      setTodoList(data.todo_list)
-      setTaskStatus(data.task_status)
-      setPendingConfig(data.pending_config || null)
+      if (!reader) {
+        throw new Error('No response stream')
+      }
+
+      let buffer = ''
+      let currentThreadId = threadId
+      let streamingContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue
+
+          const data = line.slice(6)
+          if (data === '[DONE]') continue
+
+          try {
+            const event = JSON.parse(data)
+
+            // 保存 thread_id
+            if (event.thread_id && !currentThreadId) {
+              currentThreadId = event.thread_id
+              setThreadId(currentThreadId)
+            }
+
+            switch (event.type) {
+              case 'update':
+                // 更新消息内容
+                if (event.data?.content) {
+                  streamingContent = event.data.content
+                }
+                // 更新 todo_list
+                if (event.data?.todo_list) {
+                  setTodoList(event.data.todo_list)
+                }
+                // 更新状态
+                if (event.data?.status) {
+                  setTaskStatus(event.data.status)
+                }
+                break
+
+              case 'interrupt':
+                // 处理中断
+                if (event.data?.pending_config) {
+                  setPendingConfig(event.data.pending_config)
+                  setTaskStatus('waiting_input')
+                }
+                break
+
+              case 'done':
+                // 完成，添加助手消息
+                if (streamingContent) {
+                  addMessage({
+                    role: 'assistant',
+                    content: streamingContent,
+                    timestamp: new Date().toISOString(),
+                  })
+                }
+                break
+
+              case 'error':
+                console.error('Stream error:', event.error)
+                addMessage({
+                  role: 'assistant',
+                  content: `Error: ${event.error}`,
+                  timestamp: new Date().toISOString(),
+                })
+                break
+            }
+          } catch (parseError) {
+            console.error('Failed to parse SSE event:', parseError)
+          }
+        }
+      }
     } catch (error) {
       console.error('Send message error:', error)
       addMessage({
@@ -93,14 +171,10 @@ export function useChat() {
       setPendingConfig(null)
 
       try {
-        const response = await fetch(`${API_BASE}/chat/send`, {
+        const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: '',
-            thread_id: threadId,
-            config_response: values,
-          }),
+          body: JSON.stringify(values),
         })
 
         if (!response.ok) {

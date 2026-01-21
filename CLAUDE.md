@@ -107,3 +107,41 @@ Tool schemas auto-generate frontend ConfigFormField for parameter forms.
 ## Design System
 
 Neo-Swiss style: Lavender Purple (#A78BFA), Sky Blue (#60A5FA), Mint Green (#34D399). Grid layout with generous whitespace.
+
+## Known Issues & Missing Features
+
+### 1. Frontend Stream API Integration (INCOMPLETE)
+- **Backend**: `/stream` endpoint fully implemented at `api/chat.py:116-188` with SSE
+- **Frontend**: Still using `/send` endpoint in `hooks/useChat.ts:43,96`
+- **Action Required**: Update frontend to consume SSE stream instead of blocking HTTP calls
+
+### 2. Context Engineering Abstraction (MISSING)
+No dedicated context management module exists. Current issues:
+- **Token Budget**: Config defines 4000 token limit but no enforcement/trimming logic
+- **Message History**: `executor.py:257,358,421` passes entire `state["messages"]` to LLM without:
+  - Compression of completed TODO steps
+  - White-box trimming of tool call metadata after execution
+  - Automatic summarization when approaching token limits
+- **Action Required**: Implement context manager with:
+  ```python
+  class ContextManager:
+      def compress_completed_steps(messages, todo_list) -> list[BaseMessage]
+      def trim_tool_metadata(messages) -> list[BaseMessage]
+      def enforce_token_budget(messages, max_tokens=4000) -> list[BaseMessage]
+  ```
+
+Example implementations needed:
+1. **Completed Step Compression**: Replace verbose tool call/result pairs with summary
+2. **Tool Metadata Trimming**: Remove internal tool call IDs and intermediate states after validation
+
+### 3. Human-in-the-Loop Protocol (PARTIALLY IMPLEMENTED)
+- **Backend Interrupt**: ✅ Implemented via `executor.py:182` using `interrupt()`
+- **Backend Resume**: ✅ `/resume/{thread_id}` endpoint exists at `chat.py:206`
+- **Frontend Modal**: ✅ `ConfigModal.tsx` renders dynamic forms
+- **Frontend Resume**: ❌ `useChat.ts:88` submitConfig calls `/send` instead of `/resume`
+- **Action Required**: Fix frontend to call correct resume endpoint:
+  ```typescript
+  // In useChat.ts submitConfig function, replace:
+  await fetch(`${API_BASE}/chat/send`, ...)
+  // With:
+  await fetch(`${API_BASE}/chat/resume/${threadId}`, ...)

@@ -11,6 +11,8 @@ from langgraph.graph import StateGraph, START, END
 
 from .state import AgentState, TodoStep
 from .llm import get_llm
+from .context_manager import get_context_manager
+from app.config import get_settings
 
 
 VALIDATOR_SYSTEM_PROMPT = """你是一个专业的结果校验专家。你的职责是：
@@ -105,6 +107,7 @@ def analyze_failures(todo_list: list[TodoStep]) -> dict[str, Any]:
 
 def validator_node(state: AgentState) -> dict:
     """Validator 节点 - 校验执行结果"""
+    settings = get_settings()
     llm = get_llm()
 
     todo_list = state.get("todo_list", [])
@@ -144,9 +147,13 @@ def validator_node(state: AgentState) -> dict:
         step_details=step_details,
     )
 
+    # 使用上下文管理器优化消息历史
+    context_mgr = get_context_manager(settings.message_token_limit)
+    optimized_messages = context_mgr.optimize_context(state)
+
     messages = [
         SystemMessage(content=system_prompt),
-        *state["messages"],
+        *optimized_messages,
         HumanMessage(content="请对以上任务执行结果进行验证和总结。"),
     ]
 

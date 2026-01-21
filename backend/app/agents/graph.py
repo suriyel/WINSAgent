@@ -71,7 +71,7 @@ def build_agent_graph(
     if checkpointer:
         compile_kwargs["checkpointer"] = checkpointer
         # 设置中断点 - 在 executor 前暂停以支持 Human-in-the-Loop
-        compile_kwargs["interrupt_before"] = ["executor"]
+        # compile_kwargs["interrupt_before"] = ["executor"]
 
     return builder.compile(**compile_kwargs)
 

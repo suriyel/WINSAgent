@@ -21,6 +21,43 @@ from app.models.schemas import (
 from app.agents import get_agent_graph, AgentState
 from app.tools import get_default_tools
 
+
+def serialize_state_for_sse(state_data: dict) -> dict:
+    """
+    将 state 数据序列化为可 JSON 编码的格式
+    处理 TypedDict 和其他特殊类型
+    """
+    serialized = {}
+
+    # 处理 pending_config
+    if "pending_config" in state_data and state_data["pending_config"]:
+        pc = state_data["pending_config"]
+        serialized["pending_config"] = {
+            "step_id": pc.get("step_id"),
+            "title": pc.get("title"),
+            "description": pc.get("description"),
+            "fields": [
+                {
+                    "name": f.get("name"),
+                    "label": f.get("label"),
+                    "field_type": f.get("field_type"),
+                    "required": f.get("required", False),
+                    "default": f.get("default"),
+                    "options": f.get("options"),
+                    "placeholder": f.get("placeholder"),
+                    "description": f.get("description"),
+                }
+                for f in pc.get("fields", [])
+            ],
+            "values": pc.get("values", {}),
+        }
+
+    # 处理 todo_list
+    if "todo_list" in state_data:
+        serialized["todo_list"] = state_data["todo_list"]
+
+    return serialized
+
 router = APIRouter()
 
 
@@ -139,6 +176,7 @@ async def stream_message(request: ChatRequest):
                     stream_mode="updates",
                 )
 
+            has_interrupt = False
             for update in stream:
                 # 发送更新事件
                 event_data = {
@@ -150,8 +188,9 @@ async def stream_message(request: ChatRequest):
                 # 提取节点更新
                 for node_name, node_state in update.items():
                     if node_name == "__interrupt__":
-                        event_data["type"] = "interrupt"
-                        event_data["data"] = node_state
+                        # 检测到中断
+                        has_interrupt = True
+                        continue
                     else:
                         event_data["data"]["node"] = node_name
                         if "messages" in node_state:
@@ -163,11 +202,29 @@ async def stream_message(request: ChatRequest):
                             event_data["data"]["todo_list"] = node_state["todo_list"]
                         if "final_status" in node_state:
                             event_data["data"]["status"] = node_state["final_status"]
+                        if "pending_config" in node_state and node_state["pending_config"]:
+                            # 序列化 pending_config
+                            serialized = serialize_state_for_sse({"pending_config": node_state["pending_config"]})
+                            if "pending_config" in serialized:
+                                event_data["data"]["pending_config"] = serialized["pending_config"]
 
                 yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-            # 发送完成事件
-            yield f"data: {json.dumps({'type': 'done', 'thread_id': thread_id})}\n\n"
+            # 如果发生中断，获取最新状态并发送 interrupt 事件
+            if has_interrupt:
+                final_state = graph.get_state(config)
+                if final_state and final_state.values:
+                    # 使用序列化函数处理 state 数据
+                    serialized_data = serialize_state_for_sse(final_state.values)
+                    interrupt_event = {
+                        "type": "interrupt",
+                        "thread_id": thread_id,
+                        "data": serialized_data,
+                    }
+                    yield f"data: {json.dumps(interrupt_event, ensure_ascii=False)}\n\n"
+            else:
+                # 正常完成，发送完成事件
+                yield f"data: {json.dumps({'type': 'done', 'thread_id': thread_id})}\n\n"
 
         except Exception as e:
             error_event = {
