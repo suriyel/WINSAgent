@@ -17,24 +17,15 @@ from app.tools.base import ToolRegistry
 from app.config import get_settings
 
 
-EXECUTOR_SYSTEM_PROMPT = """你是一个专业的任务执行专家。你的职责是：
-1. 根据任务步骤选择合适的工具并调用
-2. 准确填充工具所需参数
-3. 处理工具调用结果
+EXECUTOR_SYSTEM_PROMPT = """你是任务执行专家。根据步骤描述调用工具完成任务。
 
-## 当前步骤信息
-步骤ID: {step_id}
-步骤描述: {step_description}
-指定工具: {tool_name}
+当前步骤: {step_description}
+{tool_hint}
 
-## 可用工具
-{tools_info}
-
-## 执行要求
-- 如果指定了工具，请直接调用该工具
-- 如果未指定工具但需要完成任务，请选择最合适的工具
-- 如果不需要调用工具，直接给出执行结果
-- 参数必须完整准确，从上下文中推断缺失的参数
+执行规则:
+1. 从对话上下文推断工具参数
+2. 参数不完整时，使用合理默认值
+3. 无需工具时直接给出结果
 """
 
 
@@ -47,26 +38,6 @@ class ExecutorContext:
 
     def get_tool(self, name: str) -> BaseTool | None:
         return self.tool_map.get(name)
-
-    def get_tools_info(self) -> str:
-        """获取工具信息描述"""
-        if not self.tools:
-            return "无可用工具"
-
-        info = []
-        for tool in self.tools:
-            schema = tool.args_schema
-            if schema:
-                fields = []
-                for field_name, field_info in schema.model_fields.items():
-                    required = field_info.is_required()
-                    desc = field_info.description or ""
-                    fields.append(f"    - {field_name}: {desc} {'(必填)' if required else '(可选)'}")
-                params = "\n".join(fields)
-                info.append(f"- {tool.name}: {tool.description}\n  参数:\n{params}")
-            else:
-                info.append(f"- {tool.name}: {tool.description}")
-        return "\n".join(info)
 
 
 def update_step_status(
@@ -278,10 +249,8 @@ def execute_tool_with_llm(
 
     # 构建系统提示
     system_prompt = EXECUTOR_SYSTEM_PROMPT.format(
-        step_id=step_id,
         step_description=step["description"],
-        tool_name=tool.name,
-        tools_info=ctx.get_tools_info(),
+        tool_hint=f"指定工具: {tool.name}",
     )
 
     # 使用上下文管理器优化消息历史
@@ -293,7 +262,6 @@ def execute_tool_with_llm(
     messages = [
         SystemMessage(content=system_prompt),
         *optimized_messages,
-        HumanMessage(content=f"请执行步骤：{step['description']}"),
     ]
 
     try:
@@ -383,10 +351,8 @@ def execute_with_tool_selection(
     step_id = step["id"]
 
     system_prompt = EXECUTOR_SYSTEM_PROMPT.format(
-        step_id=step_id,
         step_description=step["description"],
-        tool_name="自动选择",
-        tools_info=ctx.get_tools_info(),
+        tool_hint="请根据任务需要选择合适的工具",
     )
 
     # 使用上下文管理器优化消息历史
@@ -397,7 +363,6 @@ def execute_with_tool_selection(
     messages = [
         SystemMessage(content=system_prompt),
         *optimized_messages,
-        HumanMessage(content=f"请执行步骤：{step['description']}。如果需要，请选择合适的工具。"),
     ]
 
     try:
@@ -463,10 +428,13 @@ def execute_without_tools(
     context_mgr = get_context_manager(settings.message_token_limit)
     optimized_messages = context_mgr.optimize_context(state)
 
+    system_prompt = EXECUTOR_SYSTEM_PROMPT.format(
+        step_description=step["description"],
+        tool_hint="无可用工具，请直接给出结果",
+    )
     messages = [
-        SystemMessage(content="你是一个专业的任务执行助手，请根据上下文完成指定的任务步骤。"),
+        SystemMessage(content=system_prompt),
         *optimized_messages,
-        HumanMessage(content=f"请完成以下步骤：{step['description']}"),
     ]
 
     try:
