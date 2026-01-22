@@ -291,19 +291,43 @@ async def get_chat_state(thread_id: str):
 @router.post("/resume/{thread_id}")
 async def resume_chat(thread_id: str, config_values: dict):
     """恢复被中断的会话"""
-    graph = get_agent_graph()
+    print(f"[RESUME] Thread: {thread_id}, Config values: {config_values}")
+
+    tools = get_default_tools()
+    graph = get_agent_graph(tools)
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
-        # 更新状态
-        graph.update_state(config, {"pending_config": None})
+        # 获取当前状态
+        current_state = graph.get_state(config)
+        print(f"[RESUME] Current state status: {current_state.values.get('final_status')}")
+        print(f"[RESUME] Current pending_config: {current_state.values.get('pending_config')}")
 
-        # 继续执行
-        result = graph.invoke(
-            Command(resume=config_values),
-            config=config,
+        # 清除 pending_config，设置为运行状态，并保存用户输入
+        updates = {
+            "pending_config": None,
+            "final_status": "running",
+        }
+
+        # 将用户输入保存到消息历史中
+        user_input_msg = HumanMessage(
+            content=f"用户输入: {config_values.get('user_response', str(config_values))}"
         )
+        updates["messages"] = [user_input_msg]
 
+        print(f"[RESUME] Updating state with: {updates.keys()}")
+
+        # 更新状态
+        graph.update_state(config, updates)
+
+        # 继续执行（使用 None 输入，因为状态已更新）
+        print(f"[RESUME] Invoking graph to continue execution...")
+        result = graph.invoke(None, config=config)
+
+        print(f"[RESUME] Execution completed, final status: {result.get('final_status')}")
         return state_to_response(result, thread_id)
     except Exception as e:
+        print(f"[RESUME] Error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

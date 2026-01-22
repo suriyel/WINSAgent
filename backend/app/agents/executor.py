@@ -180,35 +180,65 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
 
     # 处理用户输入请求
     if tool_name == "user_input":
-        # 构建待配置的内容
-        pending_config_data = {
-            "step_id": step_id,
-            "title": "需要您的输入",
-            "description": current_step["description"],
-            "fields": [PendingConfigField(
-                name="user_response",
-                label="您的回答",
-                field_type="textarea",
-                required=True,
-                default=None,
-                options=None,
-                placeholder="请输入您的回答...",
-                description=current_step["description"],
-            )],
-            "values": {},
-        }
+        # 检查是否已经从 HITL 恢复（用户已提交输入）
+        # 通过检查消息历史中最后一条消息是否包含 "用户输入"
+        messages = state.get("messages", [])
+        user_submitted = False
+        user_input_content = None
 
-        print(f"[EXECUTOR] Setting pending_config for step {step_id}")
-        print(f"[EXECUTOR] pending_config_data: {pending_config_data}")
+        if messages:
+            last_msg = messages[-1]
+            if hasattr(last_msg, 'content') and "用户输入:" in str(last_msg.content):
+                user_submitted = True
+                # 提取用户输入内容
+                user_input_content = str(last_msg.content).replace("用户输入: ", "")
+                print(f"[EXECUTOR] Detected user input from resume: {user_input_content}")
 
-        # 直接返回状态更新，不使用 interrupt()
-        # 改用 final_status = "waiting_input" 来标记需要用户输入
-        return {
-            "todo_list": updated_list,
-            "pending_config": pending_config_data,
-            "final_status": "waiting_input",
-            "current_agent": "executor",
-        }
+        if user_submitted:
+            # 用户已经提交输入，将步骤标记为完成
+            print(f"[EXECUTOR] Completing user_input step with: {user_input_content}")
+            updated_list = update_step_status(
+                updated_list, step_id, "completed",
+                result=user_input_content,
+                progress=100,
+            )
+            return {
+                "todo_list": updated_list,
+                "current_step": state.get("current_step", 0) + 1,
+                "pending_config": None,
+                "final_status": "running",
+                "current_agent": "executor",
+            }
+        else:
+            # 还没有用户输入，需要请求
+            pending_config_data = {
+                "step_id": step_id,
+                "title": "需要您的输入",
+                "description": current_step["description"],
+                "fields": [PendingConfigField(
+                    name="user_response",
+                    label="您的回答",
+                    field_type="textarea",
+                    required=True,
+                    default=None,
+                    options=None,
+                    placeholder="请输入您的回答...",
+                    description=current_step["description"],
+                )],
+                "values": {},
+            }
+
+            print(f"[EXECUTOR] Setting pending_config for step {step_id}")
+            print(f"[EXECUTOR] pending_config_data: {pending_config_data}")
+
+            # 直接返回状态更新，不使用 interrupt()
+            # 改用 final_status = "waiting_input" 来标记需要用户输入
+            return {
+                "todo_list": updated_list,
+                "pending_config": pending_config_data,
+                "final_status": "waiting_input",
+                "current_agent": "executor",
+            }
 
     # 如果指定了工具，直接调用
     if tool_name:
