@@ -268,44 +268,40 @@ export function useChat() {
   }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
 
   // 拒绝配置
-  const rejectConfig = useCallback(
-    async (reason?: string) => {
-      if (!threadId) {
-        console.error('[rejectConfig] No threadId')
-        return
+  const rejectConfig = useCallback(async () => {
+    if (!threadId) {
+      console.error('[rejectConfig] No threadId')
+      return
+    }
+
+    console.log('[rejectConfig] Rejecting config for thread:', threadId)
+    setIsLoading(true)
+    setPendingConfig(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          _action: 'reject',
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to reject config')
       }
 
-      console.log('[rejectConfig] Rejecting config for thread:', threadId, 'reason:', reason)
-      setIsLoading(true)
-      setPendingConfig(null)
-
-      try {
-        const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            _action: 'reject',
-            _reject_reason: reason || '用户拒绝了此操作',
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error('Failed to reject config')
-        }
-
-        const data: ChatResponse = await response.json()
-        addMessage(data.message)
-        setTodoList(data.todo_list)
-        setTaskStatus(data.task_status)
-        setPendingConfig(data.pending_config || null)
-      } catch (error) {
-        console.error('[rejectConfig] Error:', error)
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [threadId, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
-  )
+      const data: ChatResponse = await response.json()
+      addMessage(data.message)
+      setTodoList(data.todo_list)
+      setTaskStatus(data.task_status)
+      setPendingConfig(data.pending_config || null)
+    } catch (error) {
+      console.error('[rejectConfig] Error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [threadId, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
 
   // 新建对话
   const newConversation = useCallback(() => {

@@ -314,8 +314,7 @@ async def resume_chat(thread_id: str, config_values: dict):
 
         if action == "reject":
             # 处理拒绝操作
-            reject_reason = config_values.get("_reject_reason", "用户拒绝了此操作")
-            print(f"[RESUME] User rejected the operation. Reason: {reject_reason}")
+            print(f"[RESUME] User rejected the operation")
 
             # 获取当前步骤信息
             pending_config = current_state.values.get("pending_config")
@@ -327,12 +326,12 @@ async def resume_chat(thread_id: str, config_values: dict):
                 for step in todo_list:
                     if step.get("id") == step_id:
                         step["status"] = "failed"
-                        step["error"] = f"用户拒绝: {reject_reason}"
+                        step["error"] = "用户拒绝"
                         break
 
             # 构建拒绝消息
             reject_msg = AIMessage(
-                content=f"已取消此操作。原因: {reject_reason}"
+                content="已取消此操作。"
             )
 
             updates = {
@@ -340,7 +339,7 @@ async def resume_chat(thread_id: str, config_values: dict):
                 "final_status": "failed",
                 "todo_list": todo_list,
                 "messages": [reject_msg],
-                "error_info": reject_reason,
+                "error_info": "用户拒绝",
             }
 
             print(f"[RESUME] Updating state for rejection")

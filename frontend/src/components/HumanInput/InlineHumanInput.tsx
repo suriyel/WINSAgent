@@ -10,7 +10,7 @@ interface InlineHumanInputProps {
   config: PendingConfig
   onApprove: () => void
   onSubmit: (values: Record<string, unknown>) => void
-  onReject: (reason?: string) => void
+  onReject: () => void
 }
 
 export function InlineHumanInput({
@@ -21,8 +21,6 @@ export function InlineHumanInput({
 }: InlineHumanInputProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view')
   const [values, setValues] = useState<Record<string, unknown>>({})
-  const [rejectReason, setRejectReason] = useState('')
-  const [showRejectInput, setShowRejectInput] = useState(false)
 
   // 初始化默认值
   useEffect(() => {
@@ -46,16 +44,7 @@ export function InlineHumanInput({
   }
 
   const handleReject = () => {
-    if (showRejectInput) {
-      onReject(rejectReason || undefined)
-    } else {
-      setShowRejectInput(true)
-    }
-  }
-
-  const handleCancelReject = () => {
-    setShowRejectInput(false)
-    setRejectReason('')
+    onReject()
   }
 
   const renderField = (field: ConfigFormField) => {
@@ -223,45 +212,8 @@ export function InlineHumanInput({
             ))}
           </div>
 
-          {/* 拒绝原因输入 */}
-          {showRejectInput && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="px-4 pb-4"
-            >
-              <div className="p-3 bg-red-50 rounded-lg border border-red-100">
-                <label className="block mb-2 text-sm font-medium text-red-700">
-                  拒绝原因（可选）
-                </label>
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="请说明拒绝的原因..."
-                  rows={2}
-                  className="w-full px-3 py-2 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400/50 focus:border-red-400 transition-colors bg-white resize-none text-sm"
-                />
-                <div className="flex gap-2 mt-2">
-                  <button
-                    onClick={() => onReject(rejectReason || undefined)}
-                    className="px-3 py-1.5 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                  >
-                    确认拒绝
-                  </button>
-                  <button
-                    onClick={handleCancelReject}
-                    className="px-3 py-1.5 text-sm bg-gray-100 text-text-secondary rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
           {/* 操作按钮 */}
-          {!showRejectInput && (
-            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
               {mode === 'view' ? (
                 <>
                   {/* Approve 按钮 */}
@@ -311,8 +263,7 @@ export function InlineHumanInput({
                   </button>
                 </>
               )}
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </motion.div>
