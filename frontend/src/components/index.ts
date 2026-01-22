@@ -12,5 +12,8 @@ export { TodoProgress } from './TodoList/TodoProgress'
 // TaskPanel
 export { TaskPanel } from './TaskPanel/TaskPanel'
 
-// ConfigModal
+// ConfigModal (保留以便向后兼容)
 export { ConfigModal } from './ConfigModal/ConfigModal'
+
+// HumanInput (内嵌式 Human-in-the-Loop 组件)
+export { InlineHumanInput } from './HumanInput/InlineHumanInput'

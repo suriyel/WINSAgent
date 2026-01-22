@@ -290,7 +290,13 @@ async def get_chat_state(thread_id: str):
 
 @router.post("/resume/{thread_id}")
 async def resume_chat(thread_id: str, config_values: dict):
-    """恢复被中断的会话"""
+    """恢复被中断的会话
+
+    支持三种操作:
+    - approve: 批准当前配置（使用默认值）
+    - edit: 编辑后提交（使用用户修改的值）
+    - reject: 拒绝当前操作
+    """
     print(f"[RESUME] Thread: {thread_id}, Config values: {config_values}")
 
     tools = get_default_tools()
@@ -303,15 +309,58 @@ async def resume_chat(thread_id: str, config_values: dict):
         print(f"[RESUME] Current state status: {current_state.values.get('final_status')}")
         print(f"[RESUME] Current pending_config: {current_state.values.get('pending_config')}")
 
+        # 检查是否是拒绝操作
+        action = config_values.get("_action")
+
+        if action == "reject":
+            # 处理拒绝操作
+            reject_reason = config_values.get("_reject_reason", "用户拒绝了此操作")
+            print(f"[RESUME] User rejected the operation. Reason: {reject_reason}")
+
+            # 获取当前步骤信息
+            pending_config = current_state.values.get("pending_config")
+            step_id = pending_config.get("step_id") if pending_config else None
+
+            # 更新 todo_list 将当前步骤标记为失败
+            todo_list = list(current_state.values.get("todo_list", []))
+            if step_id:
+                for step in todo_list:
+                    if step.get("id") == step_id:
+                        step["status"] = "failed"
+                        step["error"] = f"用户拒绝: {reject_reason}"
+                        break
+
+            # 构建拒绝消息
+            reject_msg = AIMessage(
+                content=f"已取消此操作。原因: {reject_reason}"
+            )
+
+            updates = {
+                "pending_config": None,
+                "final_status": "failed",
+                "todo_list": todo_list,
+                "messages": [reject_msg],
+                "error_info": reject_reason,
+            }
+
+            print(f"[RESUME] Updating state for rejection")
+            graph.update_state(config, updates)
+
+            # 返回响应，不继续执行
+            updated_state = graph.get_state(config)
+            return state_to_response(updated_state.values, thread_id)
+
+        # approve 或 edit 操作（正常恢复）
         # 清除 pending_config，设置为运行状态，并保存用户输入
         updates = {
             "pending_config": None,
             "final_status": "running",
         }
 
-        # 将用户输入保存到消息历史中
+        # 移除 _action 字段后保存用户输入到消息历史中
+        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_")}
         user_input_msg = HumanMessage(
-            content=f"用户输入: {config_values.get('user_response', str(config_values))}"
+            content=f"用户输入: {clean_values.get('user_response', str(clean_values))}"
         )
         updates["messages"] = [user_input_msg]
 

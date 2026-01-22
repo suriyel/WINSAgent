@@ -6,7 +6,7 @@ import {
   ChatInput,
   TodoList,
   TaskPanel,
-  ConfigModal,
+  InlineHumanInput,
 } from '@/components'
 import { useChat } from '@/hooks/useChat'
 import { useChatStore } from '@/stores/chatStore'
@@ -24,6 +24,8 @@ export function Workstation() {
     setInputValue,
     sendMessage,
     submitConfig,
+    approveConfig,
+    rejectConfig,
     newConversation,
     loadConversation,
   } = useChat()
@@ -118,6 +120,17 @@ export function Workstation() {
                     )}
                 </div>
               ))}
+              {/* Human-in-the-Loop 内嵌输入组件 */}
+              {pendingConfig && (
+                <div className="mt-4">
+                  <InlineHumanInput
+                    config={pendingConfig}
+                    onApprove={approveConfig}
+                    onSubmit={submitConfig}
+                    onReject={rejectConfig}
+                  />
+                </div>
+              )}
               {isLoading && (
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-secondary-400 flex items-center justify-center">
@@ -159,13 +172,6 @@ export function Workstation() {
       <aside className="w-80 bg-white border-l border-gray-100">
         <TaskPanel tasks={mockTasks} />
       </aside>
-
-      {/* 配置弹窗 */}
-      <ConfigModal
-        config={pendingConfig}
-        onSubmit={submitConfig}
-        onCancel={() => useChatStore.getState().setPendingConfig(null)}
-      />
     </div>
   )
 }

@@ -182,7 +182,7 @@ export function useChat() {
     setPendingConfig,
   ])
 
-  // 提交配置
+  // 提交配置（编辑后提交）
   const submitConfig = useCallback(
     async (values: Record<string, unknown>) => {
       if (!threadId) {
@@ -218,6 +218,88 @@ export function useChat() {
         setPendingConfig(data.pending_config || null)
       } catch (error) {
         console.error('[submitConfig] Error:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [threadId, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
+  )
+
+  // 批准配置（不修改直接通过）
+  const approveConfig = useCallback(async () => {
+    if (!threadId || !pendingConfig) {
+      console.error('[approveConfig] No threadId or pendingConfig')
+      return
+    }
+
+    console.log('[approveConfig] Approving config for thread:', threadId)
+    setIsLoading(true)
+    setPendingConfig(null)
+
+    try {
+      // 使用默认值提交
+      const defaultValues: Record<string, unknown> = {}
+      pendingConfig.fields.forEach((field) => {
+        defaultValues[field.name] = pendingConfig.values[field.name] ?? field.default ?? ''
+      })
+      // 添加 approve 标记
+      defaultValues._action = 'approve'
+
+      const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(defaultValues),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to approve config')
+      }
+
+      const data: ChatResponse = await response.json()
+      addMessage(data.message)
+      setTodoList(data.todo_list)
+      setTaskStatus(data.task_status)
+      setPendingConfig(data.pending_config || null)
+    } catch (error) {
+      console.error('[approveConfig] Error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
+
+  // 拒绝配置
+  const rejectConfig = useCallback(
+    async (reason?: string) => {
+      if (!threadId) {
+        console.error('[rejectConfig] No threadId')
+        return
+      }
+
+      console.log('[rejectConfig] Rejecting config for thread:', threadId, 'reason:', reason)
+      setIsLoading(true)
+      setPendingConfig(null)
+
+      try {
+        const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            _action: 'reject',
+            _reject_reason: reason || '用户拒绝了此操作',
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to reject config')
+        }
+
+        const data: ChatResponse = await response.json()
+        addMessage(data.message)
+        setTodoList(data.todo_list)
+        setTaskStatus(data.task_status)
+        setPendingConfig(data.pending_config || null)
+      } catch (error) {
+        console.error('[rejectConfig] Error:', error)
       } finally {
         setIsLoading(false)
       }
@@ -264,6 +346,8 @@ export function useChat() {
     setInputValue,
     sendMessage,
     submitConfig,
+    approveConfig,
+    rejectConfig,
     newConversation,
     loadConversation,
   }

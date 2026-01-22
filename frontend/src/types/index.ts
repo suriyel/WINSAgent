@@ -4,6 +4,9 @@ export type TodoStatus = 'pending' | 'running' | 'completed' | 'failed'
 // 任务整体状态
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting_input'
 
+// Human-in-the-Loop 操作类型
+export type HumanInputAction = 'approve' | 'edit' | 'reject'
+
 // TODO 步骤
 export interface TodoStep {
   id: string
