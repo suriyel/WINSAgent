@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Check, X, Pencil, Bot } from 'lucide-react'
+import { Check, X, Pencil, Bot, AlertTriangle, FileInput } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { cn } from '@/utils/cn'
-import type { PendingConfig, ConfigFormField } from '@/types'
-
-export type HumanInputAction = 'approve' | 'edit' | 'reject'
+import { DynamicFormField } from './DynamicFormField'
+import type { PendingConfig } from '@/types'
 
 interface InlineHumanInputProps {
   config: PendingConfig
@@ -22,14 +21,21 @@ export function InlineHumanInput({
   const [mode, setMode] = useState<'view' | 'edit'>('view')
   const [values, setValues] = useState<Record<string, unknown>>({})
 
-  // 初始化默认值
+  const isAuthorization = config.interrupt_type === 'authorization'
+  const isParamRequired = config.interrupt_type === 'param_required'
+
+  // 初始化值
   useEffect(() => {
     const defaults: Record<string, unknown> = {}
     config.fields.forEach((field) => {
       defaults[field.name] = config.values[field.name] ?? field.default ?? ''
     })
     setValues(defaults)
-  }, [config])
+    // 参数补充场景默认进入编辑模式
+    if (isParamRequired) {
+      setMode('edit')
+    }
+  }, [config, isParamRequired])
 
   const handleChange = (name: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -39,126 +45,37 @@ export function InlineHumanInput({
     onApprove()
   }
 
-  const handleSubmitEdit = () => {
+  const handleSubmit = () => {
     onSubmit(values)
   }
 
-  const handleReject = () => {
+  const handleCancel = () => {
     onReject()
   }
 
-  const renderField = (field: ConfigFormField) => {
-    const value = values[field.name]
-
-    switch (field.field_type) {
-      case 'text':
-      case 'number':
-        return (
-          <input
-            type={field.field_type}
-            value={(value as string | number) || ''}
-            onChange={(e) =>
-              handleChange(
-                field.name,
-                field.field_type === 'number'
-                  ? Number(e.target.value)
-                  : e.target.value
-              )
-            }
-            placeholder={field.placeholder}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-400/50 focus:border-primary-400 transition-colors bg-white"
-            disabled={mode === 'view'}
-          />
-        )
-
-      case 'textarea':
-        return (
-          <textarea
-            value={(value as string) || ''}
-            onChange={(e) => handleChange(field.name, e.target.value)}
-            placeholder={field.placeholder}
-            rows={3}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-400/50 focus:border-primary-400 transition-colors bg-white resize-none"
-            disabled={mode === 'view'}
-          />
-        )
-
-      case 'select':
-        return (
-          <select
-            value={(value as string) || ''}
-            onChange={(e) => handleChange(field.name, e.target.value)}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-400/50 focus:border-primary-400 transition-colors bg-white"
-            disabled={mode === 'view'}
-          >
-            <option value="">Select...</option>
-            {field.options?.map((opt) => (
-              <option key={String(opt.value)} value={String(opt.value)}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        )
-
-      case 'switch':
-        return (
-          <button
-            type="button"
-            onClick={() => mode === 'edit' && handleChange(field.name, !value)}
-            disabled={mode === 'view'}
-            className={cn(
-              'relative w-12 h-6 rounded-full transition-colors',
-              value ? 'bg-primary-400' : 'bg-gray-200',
-              mode === 'view' && 'opacity-60 cursor-not-allowed'
-            )}
-          >
-            <div
-              className={cn(
-                'absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform',
-                value ? 'translate-x-7' : 'translate-x-1'
-              )}
-            />
-          </button>
-        )
-
-      case 'chips':
-        const selectedChips = (value as string[]) || []
-        return (
-          <div className="flex flex-wrap gap-2">
-            {field.options?.map((opt) => {
-              const isSelected = selectedChips.includes(String(opt.value))
-              return (
-                <button
-                  key={String(opt.value)}
-                  type="button"
-                  onClick={() => {
-                    if (mode === 'edit') {
-                      const newValue = isSelected
-                        ? selectedChips.filter((v) => v !== String(opt.value))
-                        : [...selectedChips, String(opt.value)]
-                      handleChange(field.name, newValue)
-                    }
-                  }}
-                  disabled={mode === 'view'}
-                  className={cn(
-                    'px-3 py-1.5 rounded-full text-sm transition-colors',
-                    isSelected
-                      ? 'bg-primary-400 text-white'
-                      : 'bg-gray-100 text-text-secondary hover:bg-gray-200',
-                    mode === 'view' && 'opacity-60 cursor-not-allowed'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              )
-            })}
-          </div>
-        )
-
-      default:
-        return null
+  // 获取场景配置
+  const getSceneConfig = () => {
+    if (isAuthorization) {
+      return {
+        icon: <AlertTriangle className="w-4 h-4" />,
+        headerBg: 'bg-gradient-to-r from-amber-50 to-orange-50',
+        headerBorder: 'border-amber-100',
+        badge: '需要授权',
+        badgeColor: 'bg-amber-100 text-amber-700',
+        dotColor: 'bg-amber-400',
+      }
+    }
+    return {
+      icon: <FileInput className="w-4 h-4" />,
+      headerBg: 'bg-gradient-to-r from-blue-50 to-indigo-50',
+      headerBorder: 'border-blue-100',
+      badge: '参数补充',
+      badgeColor: 'bg-blue-100 text-blue-700',
+      dotColor: 'bg-blue-400',
     }
   }
+
+  const scene = getSceneConfig()
 
   return (
     <motion.div
@@ -173,20 +90,32 @@ export function InlineHumanInput({
 
       {/* 内容区域 */}
       <div className="flex-1 max-w-[85%]">
-        <div className="bg-white shadow-soft rounded-2xl rounded-tl-md overflow-hidden border border-amber-100">
-          {/* 头部 - 标题和状态指示 */}
-          <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
+        <div className={cn(
+          'bg-white shadow-soft rounded-2xl rounded-tl-md overflow-hidden border',
+          scene.headerBorder
+        )}>
+          {/* 头部 */}
+          <div className={cn('px-4 py-3 border-b', scene.headerBg, scene.headerBorder)}>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <div className={cn('w-2 h-2 rounded-full animate-pulse', scene.dotColor)} />
               <h4 className="font-medium text-text-primary">{config.title}</h4>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                需要您的确认
+              <span className={cn('text-xs px-2 py-0.5 rounded-full', scene.badgeColor)}>
+                {scene.badge}
               </span>
             </div>
             {config.description && (
-              <p className="text-sm text-text-muted mt-1.5">
+              <p className="text-sm text-text-muted mt-1.5 whitespace-pre-wrap">
                 {config.description}
               </p>
+            )}
+            {/* 授权场景显示工具名 */}
+            {isAuthorization && config.tool_name && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-xs text-text-muted">工具:</span>
+                <code className="text-xs px-2 py-0.5 bg-gray-100 rounded font-mono">
+                  {config.tool_name}
+                </code>
+              </div>
             )}
           </div>
 
@@ -202,11 +131,14 @@ export function InlineHumanInput({
                     <span className="text-error-400 ml-1">*</span>
                   )}
                 </label>
-                {renderField(field)}
+                <DynamicFormField
+                  field={field}
+                  value={values[field.name]}
+                  onChange={(newValue) => handleChange(field.name, newValue)}
+                  disabled={mode === 'view'}
+                />
                 {field.description && (
-                  <p className="text-xs text-text-muted mt-1">
-                    {field.description}
-                  </p>
+                  <p className="text-xs text-text-muted mt-1">{field.description}</p>
                 )}
               </div>
             ))}
@@ -214,9 +146,10 @@ export function InlineHumanInput({
 
           {/* 操作按钮 */}
           <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
-              {mode === 'view' ? (
+            {isAuthorization ? (
+              // 授权场景: approve / edit / reject
+              mode === 'view' ? (
                 <>
-                  {/* Approve 按钮 */}
                   <button
                     onClick={handleApprove}
                     className="flex items-center gap-1.5 px-4 py-2 bg-success-500 text-white rounded-lg hover:bg-success-600 transition-colors text-sm font-medium"
@@ -224,8 +157,6 @@ export function InlineHumanInput({
                     <Check className="w-4 h-4" />
                     批准
                   </button>
-
-                  {/* Edit 按钮 */}
                   <button
                     onClick={() => setMode('edit')}
                     className="flex items-center gap-1.5 px-4 py-2 bg-primary-400 text-white rounded-lg hover:bg-primary-500 transition-colors text-sm font-medium"
@@ -233,10 +164,8 @@ export function InlineHumanInput({
                     <Pencil className="w-4 h-4" />
                     编辑
                   </button>
-
-                  {/* Reject 按钮 */}
                   <button
-                    onClick={handleReject}
+                    onClick={handleCancel}
                     className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-text-secondary rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors text-sm font-medium"
                   >
                     <X className="w-4 h-4" />
@@ -245,16 +174,13 @@ export function InlineHumanInput({
                 </>
               ) : (
                 <>
-                  {/* 提交编辑 */}
                   <button
-                    onClick={handleSubmitEdit}
+                    onClick={handleSubmit}
                     className="flex items-center gap-1.5 px-4 py-2 bg-primary-400 text-white rounded-lg hover:bg-primary-500 transition-colors text-sm font-medium"
                   >
                     <Check className="w-4 h-4" />
                     提交修改
                   </button>
-
-                  {/* 取消编辑 */}
                   <button
                     onClick={() => setMode('view')}
                     className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-text-secondary rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
@@ -262,7 +188,26 @@ export function InlineHumanInput({
                     取消
                   </button>
                 </>
-              )}
+              )
+            ) : (
+              // 参数补充场景: confirm / cancel
+              <>
+                <button
+                  onClick={handleSubmit}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-primary-400 text-white rounded-lg hover:bg-primary-500 transition-colors text-sm font-medium"
+                >
+                  <Check className="w-4 h-4" />
+                  确认
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-text-secondary rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                >
+                  <X className="w-4 h-4" />
+                  取消
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

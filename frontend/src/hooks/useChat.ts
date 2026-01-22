@@ -190,28 +190,32 @@ export function useChat() {
         return
       }
 
-      console.log('[submitConfig] Submitting values:', values, 'for thread:', threadId)
+      const interruptType = pendingConfig?.interrupt_type
+      console.log('[submitConfig] Submitting values:', values, 'type:', interruptType)
+
       setIsLoading(true)
       setPendingConfig(null)
 
       try {
+        // 根据中断类型设置 action
+        const payload: Record<string, unknown> = { ...values }
+        if (interruptType === 'authorization') {
+          payload._action = 'edit'
+        } else if (interruptType === 'param_required') {
+          payload._action = 'confirm'
+        }
+
         const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
+          body: JSON.stringify(payload),
         })
 
-        console.log('[submitConfig] Response status:', response.status)
-
         if (!response.ok) {
-          const errorText = await response.text()
-          console.error('[submitConfig] Error response:', errorText)
           throw new Error('Failed to submit config')
         }
 
         const data: ChatResponse = await response.json()
-        console.log('[submitConfig] Response data:', data)
-
         addMessage(data.message)
         setTodoList(data.todo_list)
         setTaskStatus(data.task_status)
@@ -222,10 +226,10 @@ export function useChat() {
         setIsLoading(false)
       }
     },
-    [threadId, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
+    [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
   )
 
-  // 批准配置（不修改直接通过）
+  // 批准配置（授权场景 - 不修改直接通过）
   const approveConfig = useCallback(async () => {
     if (!threadId || !pendingConfig) {
       console.error('[approveConfig] No threadId or pendingConfig')
@@ -237,18 +241,10 @@ export function useChat() {
     setPendingConfig(null)
 
     try {
-      // 使用默认值提交
-      const defaultValues: Record<string, unknown> = {}
-      pendingConfig.fields.forEach((field) => {
-        defaultValues[field.name] = pendingConfig.values[field.name] ?? field.default ?? ''
-      })
-      // 添加 approve 标记
-      defaultValues._action = 'approve'
-
       const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(defaultValues),
+        body: JSON.stringify({ _action: 'approve' }),
       })
 
       if (!response.ok) {
@@ -267,14 +263,17 @@ export function useChat() {
     }
   }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
 
-  // 拒绝配置
+  // 拒绝/取消配置
   const rejectConfig = useCallback(async () => {
     if (!threadId) {
       console.error('[rejectConfig] No threadId')
       return
     }
 
-    console.log('[rejectConfig] Rejecting config for thread:', threadId)
+    const interruptType = pendingConfig?.interrupt_type
+    const action = interruptType === 'param_required' ? 'cancel' : 'reject'
+
+    console.log('[rejectConfig] Action:', action, 'for thread:', threadId)
     setIsLoading(true)
     setPendingConfig(null)
 
@@ -282,13 +281,11 @@ export function useChat() {
       const response = await fetch(`${API_BASE}/chat/resume/${threadId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          _action: 'reject',
-        }),
+        body: JSON.stringify({ _action: action }),
       })
 
       if (!response.ok) {
-        throw new Error('Failed to reject config')
+        throw new Error('Failed to reject/cancel config')
       }
 
       const data: ChatResponse = await response.json()
@@ -301,7 +298,7 @@ export function useChat() {
     } finally {
       setIsLoading(false)
     }
-  }, [threadId, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
+  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
 
   // 新建对话
   const newConversation = useCallback(() => {

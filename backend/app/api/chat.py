@@ -40,24 +40,38 @@ def serialize_state_for_sse(state_data: dict) -> dict:
         print(f"[SERIALIZE] PC type: {type(pc)}")
         print(f"[SERIALIZE] PC fields: {pc.get('fields') if hasattr(pc, 'get') else 'not dict-like'}")
 
+        def serialize_field(f):
+            """递归序列化字段（支持嵌套和数组类型）"""
+            result = {
+                "name": f.get("name"),
+                "label": f.get("label"),
+                "field_type": f.get("field_type"),
+                "required": f.get("required", False),
+                "default": f.get("default"),
+                "options": f.get("options"),
+                "placeholder": f.get("placeholder"),
+                "description": f.get("description"),
+                "children": None,
+                "item_type": None,
+            }
+            # 递归处理 children (object 类型)
+            if f.get("children"):
+                result["children"] = [serialize_field(c) for c in f["children"]]
+            # 递归处理 item_type (array 类型)
+            if f.get("item_type"):
+                result["item_type"] = serialize_field(f["item_type"])
+            return result
+
         serialized["pending_config"] = {
             "step_id": pc.get("step_id"),
             "title": pc.get("title"),
             "description": pc.get("description"),
-            "fields": [
-                {
-                    "name": f.get("name"),
-                    "label": f.get("label"),
-                    "field_type": f.get("field_type"),
-                    "required": f.get("required", False),
-                    "default": f.get("default"),
-                    "options": f.get("options"),
-                    "placeholder": f.get("placeholder"),
-                    "description": f.get("description"),
-                }
-                for f in pc.get("fields", [])
-            ],
+            "fields": [serialize_field(f) for f in pc.get("fields", [])],
             "values": pc.get("values", {}),
+            # 新增字段
+            "interrupt_type": pc.get("interrupt_type", "authorization"),
+            "tool_name": pc.get("tool_name"),
+            "tool_args": pc.get("tool_args"),
         }
         print(f"[SERIALIZE] Serialized pending_config: {serialized['pending_config']}")
     else:
@@ -292,10 +306,15 @@ async def get_chat_state(thread_id: str):
 async def resume_chat(thread_id: str, config_values: dict):
     """恢复被中断的会话
 
-    支持三种操作:
-    - approve: 批准当前配置（使用默认值）
-    - edit: 编辑后提交（使用用户修改的值）
-    - reject: 拒绝当前操作
+    支持两种中断场景:
+    1. param_required (参数补充): 用户补充缺失参数
+       - confirm: 确认补充的参数
+       - cancel: 取消操作
+
+    2. authorization (授权): 工具执行前授权
+       - approve: 批准执行（使用原参数）
+       - edit: 编辑后执行（使用修改后的参数）
+       - reject: 拒绝执行
     """
     print(f"[RESUME] Thread: {thread_id}, Config values: {config_values}")
 
@@ -306,74 +325,82 @@ async def resume_chat(thread_id: str, config_values: dict):
     try:
         # 获取当前状态
         current_state = graph.get_state(config)
-        print(f"[RESUME] Current state status: {current_state.values.get('final_status')}")
-        print(f"[RESUME] Current pending_config: {current_state.values.get('pending_config')}")
+        pending_config = current_state.values.get("pending_config")
+        interrupt_type = pending_config.get("interrupt_type") if pending_config else None
 
-        # 检查是否是拒绝操作
+        print(f"[RESUME] Interrupt type: {interrupt_type}")
+        print(f"[RESUME] Pending config: {pending_config}")
+
         action = config_values.get("_action")
+        step_id = pending_config.get("step_id") if pending_config else None
 
-        if action == "reject":
-            # 处理拒绝操作
-            print(f"[RESUME] User rejected the operation")
+        # 处理拒绝/取消操作
+        if action in ("reject", "cancel"):
+            print(f"[RESUME] User rejected/cancelled the operation")
 
-            # 获取当前步骤信息
-            pending_config = current_state.values.get("pending_config")
-            step_id = pending_config.get("step_id") if pending_config else None
-
-            # 更新 todo_list 将当前步骤标记为失败
             todo_list = list(current_state.values.get("todo_list", []))
             if step_id:
                 for step in todo_list:
                     if step.get("id") == step_id:
                         step["status"] = "failed"
-                        step["error"] = "用户拒绝"
+                        step["error"] = "用户取消" if action == "cancel" else "用户拒绝"
                         break
 
-            # 构建拒绝消息
-            reject_msg = AIMessage(
-                content="已取消此操作。"
-            )
+            reject_msg = AIMessage(content="已取消此操作。")
 
             updates = {
                 "pending_config": None,
                 "final_status": "failed",
                 "todo_list": todo_list,
                 "messages": [reject_msg],
-                "error_info": "用户拒绝",
+                "error_info": "用户取消" if action == "cancel" else "用户拒绝",
             }
 
-            print(f"[RESUME] Updating state for rejection")
             graph.update_state(config, updates)
-
-            # 返回响应，不继续执行
             updated_state = graph.get_state(config)
             return state_to_response(updated_state.values, thread_id)
 
-        # approve 或 edit 操作（正常恢复）
-        # 清除 pending_config，设置为运行状态，并保存用户输入
+        # 处理确认/批准/编辑操作
+        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_")}
+
+        # 根据中断类型构建不同的恢复消息
+        if interrupt_type == "param_required":
+            # 参数补充场景 - 合并原有参数和用户补充的参数
+            original_args = pending_config.get("tool_args", {}) if pending_config else {}
+            merged_args = {**original_args, **clean_values}
+            msg_content = f"HITL_PARAM:{json.dumps(merged_args, ensure_ascii=False)}"
+
+        elif interrupt_type == "authorization":
+            if action == "approve":
+                # 授权批准 - 使用原参数
+                original_args = pending_config.get("tool_args", {}) if pending_config else {}
+                msg_content = f"HITL_APPROVED:{json.dumps(original_args, ensure_ascii=False)}"
+            else:
+                # 编辑后批准 - 使用修改后的参数
+                msg_content = f"HITL_EDITED:{json.dumps(clean_values, ensure_ascii=False)}"
+
+        else:
+            # 兼容旧格式 (user_input)
+            msg_content = f"用户输入: {clean_values.get('user_response', str(clean_values))}"
+
+        user_input_msg = HumanMessage(content=msg_content)
+
         updates = {
             "pending_config": None,
             "final_status": "running",
+            "messages": [user_input_msg],
         }
 
-        # 移除 _action 字段后保存用户输入到消息历史中
-        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_")}
-        user_input_msg = HumanMessage(
-            content=f"用户输入: {clean_values.get('user_response', str(clean_values))}"
-        )
-        updates["messages"] = [user_input_msg]
-
-        print(f"[RESUME] Updating state with: {updates.keys()}")
-
-        # 更新状态
+        print(f"[RESUME] Updating state with message: {msg_content[:100]}...")
         graph.update_state(config, updates)
 
-        # 继续执行（使用 None 输入，因为状态已更新）
+        # 继续执行
         print(f"[RESUME] Invoking graph to continue execution...")
         result = graph.invoke(None, config=config)
 
         print(f"[RESUME] Execution completed, final status: {result.get('final_status')}")
         return state_to_response(result, thread_id)
+
     except Exception as e:
         print(f"[RESUME] Error: {e}")
         import traceback

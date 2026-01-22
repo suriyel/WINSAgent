@@ -17,3 +17,4 @@ export { ConfigModal } from './ConfigModal/ConfigModal'
 
 // HumanInput (内嵌式 Human-in-the-Loop 组件)
 export { InlineHumanInput } from './HumanInput/InlineHumanInput'
+export { DynamicFormField } from './HumanInput/DynamicFormField'

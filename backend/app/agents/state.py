@@ -23,26 +23,37 @@ class TodoStep(TypedDict):
 
 
 class PendingConfigField(TypedDict):
-    """配置字段"""
+    """配置字段 - 支持嵌套和集合类型"""
 
     name: str
     label: str
-    field_type: str
+    field_type: Literal[
+        "text", "number", "textarea", "select", "switch", "chips",
+        "object", "array"  # 复杂类型
+    ]
     required: bool
     default: Any
     options: list[dict] | None
     placeholder: str | None
     description: str | None
+    # 嵌套类型支持
+    children: list["PendingConfigField"] | None  # object 类型的子字段
+    item_type: "PendingConfigField" | None  # array 类型的元素定义
 
 
 class PendingConfig(TypedDict):
-    """待用户配置"""
+    """待用户配置 - 支持两种中断场景"""
 
     step_id: str
     title: str
     description: str | None
     fields: list[PendingConfigField]
     values: dict[str, Any]
+    # 中断类型
+    interrupt_type: Literal["param_required", "authorization"]
+    # 授权场景专用
+    tool_name: str | None  # 待授权的工具名
+    tool_args: dict[str, Any] | None  # 工具的完整参数（授权场景展示用）
 
 
 class AgentState(TypedDict):

@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     message_token_limit: int = 4000
     recursion_limit: int = 25
 
+    # Human-in-the-Loop 配置
+    # 需要用户授权的工具列表（工具名），空列表表示所有工具都需要授权
+    tools_require_approval: list[str] = []
+    # 是否对所有工具都要求授权
+    require_approval_for_all_tools: bool = False
+
     @property
     def mysql_url(self) -> str:
         """同步 MySQL URL"""

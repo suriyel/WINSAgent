@@ -7,6 +7,9 @@ export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting
 // Human-in-the-Loop 操作类型
 export type HumanInputAction = 'approve' | 'edit' | 'reject'
 
+// HITL 中断类型
+export type InterruptType = 'param_required' | 'authorization'
+
 // TODO 步骤
 export interface TodoStep {
   id: string
@@ -21,25 +24,33 @@ export interface TodoStep {
   progress: number
 }
 
-// 配置表单字段
+// 配置表单字段 - 支持嵌套和集合类型
 export interface ConfigFormField {
   name: string
   label: string
-  field_type: 'text' | 'number' | 'select' | 'switch' | 'chips' | 'textarea'
+  field_type: 'text' | 'number' | 'select' | 'switch' | 'chips' | 'textarea' | 'object' | 'array'
   required: boolean
   default?: unknown
   options?: Array<{ label: string; value: unknown }>
   placeholder?: string
   description?: string
+  // 嵌套类型支持
+  children?: ConfigFormField[]  // object 类型的子字段
+  item_type?: ConfigFormField   // array 类型的元素定义
 }
 
-// 待配置项
+// 待配置项 - 支持两种中断场景
 export interface PendingConfig {
   step_id: string
   title: string
   description?: string | null
   fields: ConfigFormField[]
   values: Record<string, unknown>
+  // 中断类型
+  interrupt_type: InterruptType
+  // 授权场景专用
+  tool_name?: string | null
+  tool_args?: Record<string, unknown> | null
 }
 
 // 聊天消息
