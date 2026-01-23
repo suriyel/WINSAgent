@@ -52,6 +52,7 @@ User Input → [Supervisor] → routes to:
 ### Key Backend Modules (`backend/app/`)
 - **`agents/state.py`** - AgentState TypedDict (messages, todo_list, pending_config)
 - **`agents/graph.py`** - StateGraph assembly with interrupt handling
+- **`agents/hitl.py`** - HITL protocol: HITLAction enum, encoder/decoder, config builders
 - **`agents/supervisor.py`** - Routing & coordination
 - **`agents/planner.py`** - Task decomposition
 - **`agents/executor.py`** - Tool execution with HITL interrupts
@@ -69,12 +70,23 @@ User Input → [Supervisor] → routes to:
 - **`components/ConfigModal/`** - Dynamic form for HITL interrupts
 - **`components/TodoList/`** - Task steps with progress visualization
 
-### Human-in-the-Loop Flow
-1. Executor sets `pending_config` with form fields, triggers `interrupt()`
+### Human-in-the-Loop Protocol (`agents/hitl.py`)
+
+Centralized HITL communication with type-safe encoding/decoding:
+
+**Components:**
+- `HITLAction` enum: `approve`, `edit`, `confirm`, `reject`, `cancel`
+- `HITLMessageEncoder`: Encodes user actions to HumanMessage for graph state
+- `HITLMessageDecoder`: Decodes HumanMessage to HITLResumeData for executor
+- Config builders: `create_authorization_config()`, `create_param_required_config()`, `create_user_input_config()`
+
+**Flow:**
+1. Executor creates `pending_config` using config builders, sets `final_status="waiting_input"`
 2. SSE sends "interrupt" event to frontend with `pending_config`
 3. User interacts with ConfigModal (approve/edit/reject)
-4. Frontend calls `POST /chat/resume/{thread_id}` with `_action` (approve/edit/reject/cancel)
-5. Backend resumes execution via `graph.ainvoke(Command(resume=...))`
+4. Frontend calls `POST /chat/resume/{thread_id}` with `action` field
+5. Backend uses `HITLMessageEncoder.encode()` to create structured message
+6. Executor uses `HITLMessageDecoder.decode()` to parse and resume execution
 
 ### Context Management (`agents/context_manager.py`)
 The `ContextManager` class handles token budget enforcement:
@@ -86,7 +98,9 @@ The `ContextManager` class handles token budget enforcement:
 ## API Endpoints (v1)
 
 - `POST /chat/stream` - Send message with SSE streaming
-- `POST /chat/resume/{thread_id}` - Resume after interrupt (body: `{_action: "approve"|"edit"|"reject"|"cancel", ...values}`)
+- `POST /chat/resume/{thread_id}` - Resume after interrupt
+  - Body: `{action: "approve"|"edit"|"confirm"|"reject"|"cancel", ...values}`
+  - Supports legacy `_action` field for backward compatibility
 - `GET /chat/state/{thread_id}` - Get conversation state
 - `GET /tools/` - List available tools
 - `POST /knowledge/search` - Search knowledge base
