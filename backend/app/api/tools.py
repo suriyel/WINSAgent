@@ -3,6 +3,7 @@ Tools API 端点
 提供工具列表、详情、Schema 查询
 """
 
+from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field

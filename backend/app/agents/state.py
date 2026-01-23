@@ -2,7 +2,7 @@
 Agent State 定义
 基于 LangGraph 1.0 标准模式
 """
-
+from __future__ import annotations
 from typing import Annotated, TypedDict, Literal, Any
 from langgraph.graph import add_messages
 from langchain_core.messages import BaseMessage
@@ -37,8 +37,8 @@ class PendingConfigField(TypedDict):
     placeholder: str | None
     description: str | None
     # 嵌套类型支持
-    children: list["PendingConfigField"] | None  # object 类型的子字段
-    item_type: "PendingConfigField" | None  # array 类型的元素定义
+    children: list[PendingConfigField] | None  # object 类型的子字段
+    item_type: PendingConfigField | None  # array 类型的元素定义
 
 
 class PendingConfig(TypedDict):
