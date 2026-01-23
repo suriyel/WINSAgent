@@ -322,18 +322,26 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
     # 处理用户输入请求
     if tool_name == "user_input":
         # 检查是否已经从 HITL 恢复（用户已提交输入）
-        # 通过检查消息历史中最后一条消息是否包含 "用户输入"
+        # 使用与 check_hitl_resume 相同的格式检测
         messages = state.get("messages", [])
         user_submitted = False
         user_input_content = None
 
         if messages:
             last_msg = messages[-1]
-            if hasattr(last_msg, 'content') and "用户输入:" in str(last_msg.content):
+            content = str(last_msg.content) if hasattr(last_msg, 'content') else ""
+
+            # 检查 HITL_PARAM 格式 (param_required 中断类型)
+            if content.startswith("HITL_PARAM:"):
                 user_submitted = True
-                # 提取用户输入内容
-                user_input_content = str(last_msg.content).replace("用户输入: ", "")
-                print(f"[EXECUTOR] Detected user input from resume: {user_input_content}")
+                data_str = content.replace("HITL_PARAM:", "")
+                try:
+                    data = json.loads(data_str)
+                    # 提取 user_response 字段
+                    user_input_content = data.get("user_response", str(data))
+                except json.JSONDecodeError:
+                    user_input_content = data_str
+                print(f"[EXECUTOR] Detected user input from HITL_PARAM: {user_input_content}")
 
         if user_submitted:
             # 用户已经提交输入，将步骤标记为完成
