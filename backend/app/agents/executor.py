@@ -3,16 +3,21 @@ Executor SubGraph - 任务执行Agent
 负责：Tool选择、参数填充、执行调度、重试处理
 """
 
-import json
 from typing import Any
-from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt
 
 from .state import AgentState, TodoStep, PendingConfigField
 from .llm import get_llm, get_llm_with_tools
 from .context_manager import get_context_manager
+from .hitl import (
+    HITLMessageDecoder,
+    HITLResumeData,
+    create_authorization_config as hitl_create_authorization_config,
+    create_param_required_config as hitl_create_param_required_config,
+    create_user_input_config,
+)
 from app.tools.base import ToolRegistry
 from app.config import get_settings
 
@@ -256,17 +261,15 @@ def create_authorization_config(
     tool: BaseTool,
     tool_args: dict,
 ) -> dict:
-    """创建授权场景的 PendingConfig"""
-    return {
-        "step_id": step_id,
-        "title": f"工具授权: {tool.name}",
-        "description": f"即将执行 {tool.name}，请确认是否授权。\n\n{tool.description}",
-        "fields": generate_config_fields_from_tool(tool),
-        "values": tool_args,
-        "interrupt_type": "authorization",
-        "tool_name": tool.name,
-        "tool_args": tool_args,
-    }
+    """创建授权场景的 PendingConfig - 委托给 hitl 模块"""
+    fields = generate_config_fields_from_tool(tool)
+    return hitl_create_authorization_config(
+        step_id=step_id,
+        tool_name=tool.name,
+        tool_description=tool.description or "",
+        tool_args=tool_args,
+        fields=fields,
+    )
 
 
 def create_param_required_config(
@@ -275,17 +278,13 @@ def create_param_required_config(
     missing_fields: list[PendingConfigField],
     partial_args: dict,
 ) -> dict:
-    """创建参数缺失场景的 PendingConfig"""
-    return {
-        "step_id": step_id,
-        "title": f"参数补充: {tool.name}",
-        "description": f"工具 {tool.name} 缺少必需参数，请补充。",
-        "fields": missing_fields,
-        "values": partial_args,
-        "interrupt_type": "param_required",
-        "tool_name": tool.name,
-        "tool_args": partial_args,
-    }
+    """创建参数缺失场景的 PendingConfig - 委托给 hitl 模块"""
+    return hitl_create_param_required_config(
+        step_id=step_id,
+        tool_name=tool.name,
+        missing_fields=missing_fields,
+        partial_args=partial_args,
+    )
 
 
 def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dict:
@@ -321,31 +320,21 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
 
     # 处理用户输入请求
     if tool_name == "user_input":
-        # 检查是否已经从 HITL 恢复（用户已提交输入）
-        # 使用与 check_hitl_resume 相同的格式检测
+        # 使用 HITLMessageDecoder 检查是否已从 HITL 恢复
         messages = state.get("messages", [])
-        user_submitted = False
-        user_input_content = None
+        resume_data: HITLResumeData | None = None
 
         if messages:
-            last_msg = messages[-1]
-            content = str(last_msg.content) if hasattr(last_msg, 'content') else ""
+            resume_data = HITLMessageDecoder.decode(messages[-1])
 
-            # 检查 HITL_PARAM 格式 (param_required 中断类型)
-            if content.startswith("HITL_PARAM:"):
-                user_submitted = True
-                data_str = content.replace("HITL_PARAM:", "")
-                try:
-                    data = json.loads(data_str)
-                    # 提取 user_response 字段
-                    user_input_content = data.get("user_response", str(data))
-                except json.JSONDecodeError:
-                    user_input_content = data_str
-                print(f"[EXECUTOR] Detected user input from HITL_PARAM: {user_input_content}")
-
-        if user_submitted:
-            # 用户已经提交输入，将步骤标记为完成
+        if resume_data and resume_data.is_approval:
+            # 用户已提交输入，提取 user_response 字段
+            user_input_content = resume_data.tool_args.get(
+                "user_response",
+                str(resume_data.tool_args)
+            )
             print(f"[EXECUTOR] Completing user_input step with: {user_input_content}")
+
             updated_list = update_step_status(
                 updated_list, step_id, "completed",
                 result=user_input_content,
@@ -358,35 +347,32 @@ def executor_node(state: AgentState, tools: list[BaseTool] | None = None) -> dic
                 "final_status": "running",
                 "current_agent": "executor",
             }
-        else:
-            # 还没有用户输入，需要请求
-            pending_config_data = {
-                "step_id": step_id,
-                "title": "需要您的输入",
-                "description": current_step["description"],
-                "fields": [{
-                    "name": "user_response",
-                    "label": "您的回答",
-                    "field_type": "textarea",
-                    "required": True,
-                    "default": None,
-                    "options": None,
-                    "placeholder": "请输入您的回答...",
-                    "description": current_step["description"],
-                    "children": None,
-                    "item_type": None,
-                }],
-                "values": {},
-                "interrupt_type": "param_required",
-                "tool_name": "user_input",
-                "tool_args": {},
+
+        elif resume_data and resume_data.is_cancellation:
+            # 用户取消了输入
+            print(f"[EXECUTOR] User cancelled user_input step")
+            updated_list = update_step_status(
+                updated_list, step_id, "failed",
+                error="用户取消",
+                progress=0,
+            )
+            return {
+                "todo_list": updated_list,
+                "pending_config": None,
+                "final_status": "failed",
+                "current_agent": "executor",
+                "error_info": "用户取消输入",
             }
 
-            print(f"[EXECUTOR] Setting pending_config for step {step_id}")
-            print(f"[EXECUTOR] pending_config_data: {pending_config_data}")
+        else:
+            # 还没有用户输入，需要请求 - 使用 hitl 模块创建配置
+            pending_config_data = create_user_input_config(
+                step_id=step_id,
+                description=current_step["description"],
+            )
 
-            # 直接返回状态更新，不使用 interrupt()
-            # 改用 final_status = "waiting_input" 来标记需要用户输入
+            print(f"[EXECUTOR] Setting pending_config for step {step_id}")
+
             return {
                 "todo_list": updated_list,
                 "pending_config": pending_config_data,
@@ -492,45 +478,6 @@ def execute_tool_directly(
             }
 
 
-def check_hitl_resume(state: AgentState) -> tuple[bool, dict | None]:
-    """
-    检查是否从 HITL 中断恢复
-    返回: (是否已恢复, 用户提交的数据)
-    """
-    messages = state.get("messages", [])
-    if not messages:
-        return False, None
-
-    last_msg = messages[-1]
-    content = str(last_msg.content) if hasattr(last_msg, 'content') else ""
-
-    # 检查授权通过
-    if content.startswith("HITL_APPROVED:"):
-        data_str = content.replace("HITL_APPROVED:", "")
-        try:
-            return True, {"action": "approve", "data": json.loads(data_str)}
-        except:
-            return True, {"action": "approve", "data": {}}
-
-    # 检查编辑后提交
-    if content.startswith("HITL_EDITED:"):
-        data_str = content.replace("HITL_EDITED:", "")
-        try:
-            return True, {"action": "edit", "data": json.loads(data_str)}
-        except:
-            return True, {"action": "edit", "data": {}}
-
-    # 检查参数补充
-    if content.startswith("HITL_PARAM:"):
-        data_str = content.replace("HITL_PARAM:", "")
-        try:
-            return True, {"action": "param", "data": json.loads(data_str)}
-        except:
-            return True, {"action": "param", "data": {}}
-
-    return False, None
-
-
 def execute_tool_with_llm(
     state: AgentState,
     step: TodoStep,
@@ -542,13 +489,31 @@ def execute_tool_with_llm(
     settings = get_settings()
     step_id = step["id"]
 
-    # 检查是否从 HITL 恢复
-    resumed, resume_data = check_hitl_resume(state)
-    if resumed and resume_data:
-        print(f"[EXECUTOR] Resumed from HITL: {resume_data}")
-        # 使用用户提供/确认的参数执行工具
-        tool_args = resume_data.get("data", {})
-        return execute_tool_directly(state, step, tool, tool_args, todo_list)
+    # 使用 HITLMessageDecoder 检查是否从 HITL 恢复
+    messages = state.get("messages", [])
+    resume_data: HITLResumeData | None = None
+    if messages:
+        resume_data = HITLMessageDecoder.decode(messages[-1])
+
+    if resume_data:
+        if resume_data.is_cancellation:
+            # 用户拒绝/取消了操作
+            print(f"[EXECUTOR] User cancelled tool execution: {resume_data.action}")
+            updated_list = update_step_status(
+                todo_list, step_id, "failed",
+                error="用户拒绝" if resume_data.action.value == "reject" else "用户取消",
+            )
+            return {
+                "todo_list": updated_list,
+                "pending_config": None,
+                "final_status": "failed",
+                "current_agent": "executor",
+                "error_info": f"用户{resume_data.action.value}操作",
+            }
+
+        # 用户批准/确认了参数，执行工具
+        print(f"[EXECUTOR] Resumed from HITL: action={resume_data.action}, args={resume_data.tool_args}")
+        return execute_tool_directly(state, step, tool, resume_data.tool_args, todo_list)
 
     # 构建系统提示
     system_prompt = EXECUTOR_SYSTEM_PROMPT.format(

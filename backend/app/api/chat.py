@@ -19,6 +19,7 @@ from app.models.schemas import (
     PendingConfig,
 )
 from app.agents import get_agent_graph, AgentState
+from app.agents.hitl import HITLAction, HITLMessageEncoder
 from app.tools import get_default_tools
 
 
@@ -331,29 +332,46 @@ async def resume_chat(thread_id: str, config_values: dict):
         print(f"[RESUME] Interrupt type: {interrupt_type}")
         print(f"[RESUME] Pending config: {pending_config}")
 
-        action = config_values.get("_action")
+        # 解析 action - 支持 _action (旧) 和 action (新) 字段
+        action_str = config_values.get("_action") or config_values.get("action")
         step_id = pending_config.get("step_id") if pending_config else None
 
+        # 将 action 字符串转换为 HITLAction 枚举
+        try:
+            action = HITLAction(action_str) if action_str else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid action: {action_str}")
+
+        if not action:
+            raise HTTPException(status_code=400, detail="Missing action field")
+
         # 处理拒绝/取消操作
-        if action in ("reject", "cancel"):
-            print(f"[RESUME] User rejected/cancelled the operation")
+        if action in (HITLAction.REJECT, HITLAction.CANCEL):
+            print(f"[RESUME] User {action.value} the operation")
 
             todo_list = list(current_state.values.get("todo_list", []))
             if step_id:
                 for step in todo_list:
                     if step.get("id") == step_id:
                         step["status"] = "failed"
-                        step["error"] = "用户取消" if action == "cancel" else "用户拒绝"
+                        step["error"] = "用户取消" if action == HITLAction.CANCEL else "用户拒绝"
                         break
 
             reject_msg = AIMessage(content="已取消此操作。")
+
+            # 使用 HITLMessageEncoder 创建取消消息（用于状态记录）
+            hitl_msg = HITLMessageEncoder.encode(
+                action=action,
+                values={},
+                pending_config=pending_config,
+            )
 
             updates = {
                 "pending_config": None,
                 "final_status": "failed",
                 "todo_list": todo_list,
-                "messages": [reject_msg],
-                "error_info": "用户取消" if action == "cancel" else "用户拒绝",
+                "messages": [hitl_msg, reject_msg],
+                "error_info": "用户取消" if action == HITLAction.CANCEL else "用户拒绝",
             }
 
             graph.update_state(config, updates)
@@ -361,29 +379,23 @@ async def resume_chat(thread_id: str, config_values: dict):
             return state_to_response(updated_state.values, thread_id)
 
         # 处理确认/批准/编辑操作
-        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_")}
+        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_") and k != "action"}
 
-        # 根据中断类型构建不同的恢复消息
-        if interrupt_type == "param_required":
-            # 参数补充场景 - 合并原有参数和用户补充的参数
-            original_args = pending_config.get("tool_args", {}) if pending_config else {}
-            merged_args = {**original_args, **clean_values}
-            msg_content = f"HITL_PARAM:{json.dumps(merged_args, ensure_ascii=False)}"
+        # 根据 action 类型映射到正确的 HITLAction
+        # approve -> APPROVE, edit -> EDIT, confirm -> CONFIRM
+        if action_str == "confirm":
+            action = HITLAction.CONFIRM
+        elif action_str == "approve":
+            action = HITLAction.APPROVE
+        elif action_str == "edit":
+            action = HITLAction.EDIT
 
-        elif interrupt_type == "authorization":
-            if action == "approve":
-                # 授权批准 - 使用原参数
-                original_args = pending_config.get("tool_args", {}) if pending_config else {}
-                msg_content = f"HITL_APPROVED:{json.dumps(original_args, ensure_ascii=False)}"
-            else:
-                # 编辑后批准 - 使用修改后的参数
-                msg_content = f"HITL_EDITED:{json.dumps(clean_values, ensure_ascii=False)}"
-
-        else:
-            # 兼容旧格式 (user_input)
-            msg_content = f"用户输入: {clean_values.get('user_response', str(clean_values))}"
-
-        user_input_msg = HumanMessage(content=msg_content)
+        # 使用 HITLMessageEncoder 创建消息
+        user_input_msg = HITLMessageEncoder.encode(
+            action=action,
+            values=clean_values,
+            pending_config=pending_config,
+        )
 
         updates = {
             "pending_config": None,
@@ -391,7 +403,7 @@ async def resume_chat(thread_id: str, config_values: dict):
             "messages": [user_input_msg],
         }
 
-        print(f"[RESUME] Updating state with message: {msg_content[:100]}...")
+        print(f"[RESUME] Updating state with HITL message: action={action.value}")
         graph.update_state(config, updates)
 
         # 继续执行
@@ -401,6 +413,8 @@ async def resume_chat(thread_id: str, config_values: dict):
         print(f"[RESUME] Execution completed, final status: {result.get('final_status')}")
         return state_to_response(result, thread_id)
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[RESUME] Error: {e}")
         import traceback
