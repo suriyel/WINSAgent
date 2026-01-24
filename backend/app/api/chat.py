@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import Command
 import json
+import httpx
 
 from app.models.schemas import (
     ChatRequest,
@@ -21,6 +22,31 @@ from app.models.schemas import (
 from app.agents import get_agent_graph, AgentState
 from app.agents.hitl import HITLAction, HITLMessageEncoder
 from app.tools import get_default_tools
+from app.api.conversations import _conversations_store, ConversationInfo
+from datetime import datetime
+
+
+def create_or_update_conversation(thread_id: str, message: str | None = None):
+    """创建或更新对话记录"""
+    try:
+        if thread_id in _conversations_store:
+            # 更新现有对话
+            conv = _conversations_store[thread_id]
+            if message:
+                conv.title = message[:30]
+                conv.last_message = message[:100]
+            conv.updated_at = datetime.now()
+        else:
+            # 创建新对话
+            _conversations_store[thread_id] = ConversationInfo(
+                thread_id=thread_id,
+                title=message[:30] if message else "新对话",
+                last_message=message[:100] if message else None,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+    except Exception as e:
+        print(f"[DEBUG] Failed to create/update conversation: {e}")
 
 
 def serialize_state_for_sse(state_data: dict) -> dict:
@@ -158,6 +184,9 @@ async def send_message(request: ChatRequest):
     # 获取或创建 thread_id
     thread_id = request.thread_id or str(uuid.uuid4())
 
+    # 创建或更新对话记录
+    create_or_update_conversation(thread_id, request.message)
+
     # 获取 Agent Graph
     tools = get_default_tools()
     graph = get_agent_graph(tools)
@@ -185,6 +214,9 @@ async def send_message(request: ChatRequest):
 async def stream_message(request: ChatRequest):
     """流式发送聊天消息"""
     thread_id = request.thread_id or str(uuid.uuid4())
+
+    # 创建或更新对话记录
+    create_or_update_conversation(thread_id, request.message)
 
     tools = get_default_tools()
     graph = get_agent_graph(tools)
@@ -282,6 +314,14 @@ async def stream_message(request: ChatRequest):
                         done_event["data"] = {}
                     done_event["data"]["todo_list"] = last_state_data["todo_list"]
                 yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+
+                # 更新对话的最后消息
+                if last_state_data.get("messages"):
+                    messages = last_state_data["messages"]
+                    if messages:
+                        last_msg = messages[-1]
+                        if last_msg.content:
+                            create_or_update_conversation(thread_id, last_msg.content)
 
         except Exception as e:
             error_event = {
@@ -425,6 +465,15 @@ async def resume_chat(thread_id: str, config_values: dict):
         result = graph.invoke(None, config=config)
 
         print(f"[RESUME] Execution completed, final status: {result.get('final_status')}")
+
+        # 更新对话的最后消息
+        if result.get("messages"):
+            messages = result["messages"]
+            if messages:
+                last_msg = messages[-1]
+                if last_msg.content:
+                    create_or_update_conversation(thread_id, last_msg.content)
+
         return state_to_response(result, thread_id)
 
     except HTTPException:

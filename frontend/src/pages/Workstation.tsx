@@ -29,6 +29,7 @@ export function Workstation() {
     rejectConfig,
     newConversation,
     loadConversation,
+    fetchConversations,
   } = useChat()
 
   const { conversations } = useChatStore()
@@ -37,6 +38,11 @@ export function Workstation() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 获取对话列表
+  useEffect(() => {
+    fetchConversations()
+  }, [fetchConversations])
 
   // 模拟任务数据
   const mockTasks = todoList.length > 0

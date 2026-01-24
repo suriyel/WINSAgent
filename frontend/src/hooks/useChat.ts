@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useChatStore } from '@/stores/chatStore'
-import type { ChatResponse } from '@/types'
+import type { ChatResponse, Conversation } from '@/types'
 
 const API_BASE = '/api/v1'
 
@@ -22,7 +22,22 @@ export function useChat() {
     setInputValue,
     setIsLoading,
     reset,
+    setConversations,
   } = useChatStore()
+
+  // 获取对话列表 - 必须在其他使用它的回调之前定义
+  const fetchConversations = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/conversations`)
+      if (response.ok) {
+        const data = await response.json()
+        const conversations: Conversation[] = data.conversations || []
+        setConversations(conversations)
+      }
+    } catch (error) {
+      console.error('Fetch conversations error:', error)
+    }
+  }, [setConversations])
 
   // 发送消息（使用 SSE 流式传输）
   const sendMessage = useCallback(async () => {
@@ -166,6 +181,9 @@ export function useChat() {
           }
         }
       }
+
+      // 刷新对话列表
+      fetchConversations()
     } catch (error) {
       console.error('Send message error:', error)
       addMessage({
@@ -187,6 +205,7 @@ export function useChat() {
     setTodoList,
     setTaskStatus,
     setPendingConfig,
+    fetchConversations,
   ])
 
   // 提交配置（编辑后提交）
@@ -227,13 +246,16 @@ export function useChat() {
         setTodoList(data.todo_list)
         setTaskStatus(data.task_status)
         setPendingConfig(data.pending_config || null)
+
+        // 刷新对话列表
+        fetchConversations()
       } catch (error) {
         console.error('[submitConfig] Error:', error)
       } finally {
         setIsLoading(false)
       }
     },
-    [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
+    [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading, fetchConversations]
   )
 
   // 批准配置（授权场景 - 不修改直接通过）
@@ -263,12 +285,15 @@ export function useChat() {
       setTodoList(data.todo_list)
       setTaskStatus(data.task_status)
       setPendingConfig(data.pending_config || null)
+
+      // 刷新对话列表
+      fetchConversations()
     } catch (error) {
       console.error('[approveConfig] Error:', error)
     } finally {
       setIsLoading(false)
     }
-  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
+  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading, fetchConversations])
 
   // 拒绝/取消配置
   const rejectConfig = useCallback(async () => {
@@ -300,12 +325,15 @@ export function useChat() {
       setTodoList(data.todo_list)
       setTaskStatus(data.task_status)
       setPendingConfig(data.pending_config || null)
+
+      // 刷新对话列表
+      fetchConversations()
     } catch (error) {
       console.error('[rejectConfig] Error:', error)
     } finally {
       setIsLoading(false)
     }
-  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading])
+  }, [threadId, pendingConfig, addMessage, setTodoList, setTaskStatus, setPendingConfig, setIsLoading, fetchConversations])
 
   // 新建对话
   const newConversation = useCallback(() => {
@@ -350,5 +378,6 @@ export function useChat() {
     rejectConfig,
     newConversation,
     loadConversation,
+    fetchConversations,
   }
 }
