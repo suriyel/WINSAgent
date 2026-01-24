@@ -156,17 +156,14 @@ def validator_node(state: AgentState) -> dict:
         step_details=step_details,
     )
 
-    # 使用上下文管理器优化消息历史
-    context_mgr = get_context_manager(settings.message_token_limit)
-    optimized_messages = context_mgr.optimize_context(state)
-
-    messages = [
+    # Validator 不需要完整的消息历史，只需要系统提示和总结请求
+    # 避免传递包含 tool_calls 的消息，这些消息可能会导致 LLM 格式错误
+    final_messages = [
         SystemMessage(content=system_prompt),
-        *optimized_messages,
         HumanMessage(content="请对以上任务执行结果进行验证和总结。"),
     ]
 
-    response = llm.invoke(messages)
+    response = llm.invoke(final_messages)
 
     # 判定最终状态（考虑 skipped 步骤）
     finished_count = completed + skipped  # 完成 + 跳过 = 实际处理完毕

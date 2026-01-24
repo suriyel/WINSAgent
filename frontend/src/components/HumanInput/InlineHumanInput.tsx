@@ -27,10 +27,6 @@ export function InlineHumanInput({
   // 参数补充场景始终可编辑，授权场景依赖 mode 状态
   const effectiveMode = isParamRequired ? 'edit' : mode
 
-  // 调试信息
-  console.log('[InlineHumanInput] FULL config:', JSON.stringify(config, null, 2))
-  console.log('[InlineHumanInput] interrupt_type:', config.interrupt_type, '| isParamRequired:', isParamRequired, '| effectiveMode:', effectiveMode)
-
   // 初始化值
   useEffect(() => {
     const defaults: Record<string, unknown> = {}
