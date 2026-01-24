@@ -7,7 +7,8 @@
       "Bash(xargs -I {} bash -c 'echo \"\"=== {} ===\"\" && head -20 {}')",
       "Bash(python:*)",
       "Bash(npm run lint)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
