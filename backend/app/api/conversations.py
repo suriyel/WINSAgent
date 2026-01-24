@@ -82,5 +82,29 @@ async def delete_conversation(thread_id: str):
     if thread_id not in _conversations_store:
         raise HTTPException(status_code=404, detail="对话不存在")
 
+    # 从存储中删除对话记录
     del _conversations_store[thread_id]
+
+    # 同时删除 LangGraph 的 thread state
+    try:
+        from app.agents.graph import get_agent_graph
+        from app.config import get_settings
+
+        graph = get_agent_graph()
+        settings = get_settings()
+
+        # 如果使用 Redis 作为 checkpointer，清理 Redis 中的数据
+        if settings.redis_url:
+            import redis
+
+            redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+            # LangGraph Redis checkpointer 存储格式: checkpointer:{thread_id}*
+            pattern = f"checkpointer:{thread_id}*"
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                print(f"[DEBUG] Deleted {len(keys)} Redis keys for thread {thread_id}")
+    except Exception as e:
+        print(f"[DEBUG] Failed to delete graph state for thread {thread_id}: {e}")
+
     return {"message": "对话删除成功", "thread_id": thread_id}

@@ -39,6 +39,28 @@ export function useChat() {
     }
   }, [setConversations])
 
+  // 删除对话
+  const deleteConversation = useCallback(
+    async (threadId: string) => {
+      try {
+        const response = await fetch(`${API_BASE}/conversations/${threadId}`, {
+          method: 'DELETE',
+        })
+        if (response.ok) {
+          // 如果删除的是当前对话，重置状态
+          if (threadId === threadId) {
+            reset()
+          }
+          // 刷新对话列表
+          fetchConversations()
+        }
+      } catch (error) {
+        console.error('Delete conversation error:', error)
+      }
+    },
+    [threadId, reset, fetchConversations]
+  )
+
   // 发送消息（使用 SSE 流式传输）
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return
@@ -379,5 +401,6 @@ export function useChat() {
     newConversation,
     loadConversation,
     fetchConversations,
+    deleteConversation,
   }
 }

@@ -1,5 +1,6 @@
-import { useRef, useEffect } from 'react'
-import { Bot } from 'lucide-react'
+import { useRef, useEffect, useState, useCallback } from 'react'
+import { Bot, GripVertical } from 'lucide-react'
+import { cn } from '@/utils/cn'
 import {
   ConversationList,
   ChatMessage,
@@ -11,8 +12,20 @@ import {
 import { useChat } from '@/hooks/useChat'
 import { useChatStore } from '@/stores/chatStore'
 
+const DEFAULT_SIDEBAR_WIDTH = 288
+const MIN_SIDEBAR_WIDTH = 200
+const MAX_SIDEBAR_WIDTH = 500
+
 export function Workstation() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const resizeHandleRef = useRef<HTMLDivElement>(null)
+
+  // 侧边栏宽度状态（持久化到 localStorage）
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('sidebarWidth')
+    return saved ? Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, parseInt(saved, 10))) : DEFAULT_SIDEBAR_WIDTH
+  })
+  const [isResizing, setIsResizing] = useState(false)
 
   const {
     threadId,
@@ -30,9 +43,15 @@ export function Workstation() {
     newConversation,
     loadConversation,
     fetchConversations,
+    deleteConversation,
   } = useChat()
 
   const { conversations } = useChatStore()
+
+  // 保存侧边栏宽度到 localStorage
+  useEffect(() => {
+    localStorage.setItem('sidebarWidth', sidebarWidth.toString())
+  }, [sidebarWidth])
 
   // 自动滚动到底部
   useEffect(() => {
@@ -43,6 +62,30 @@ export function Workstation() {
   useEffect(() => {
     fetchConversations()
   }, [fetchConversations])
+
+  // 调整侧边栏宽度的处理函数
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX
+      const newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, startWidth + deltaX))
+      setSidebarWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [sidebarWidth])
 
   // 模拟任务数据
   const mockTasks = todoList.length > 0
@@ -67,7 +110,10 @@ export function Workstation() {
   return (
     <div className="h-screen flex bg-background">
       {/* 左侧边栏 - 对话历史 */}
-      <aside className="w-72 bg-gradient-to-b from-primary-50 to-secondary-50 border-r border-gray-100 flex flex-col">
+      <aside
+        className="bg-gradient-to-b from-primary-50 to-secondary-50 border-r border-gray-100 flex flex-col"
+        style={{ width: `${sidebarWidth}px`, minWidth: `${MIN_SIDEBAR_WIDTH}px`, maxWidth: `${MAX_SIDEBAR_WIDTH}px` }}
+      >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100/50">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-secondary-400 flex items-center justify-center">
@@ -86,9 +132,20 @@ export function Workstation() {
             activeThreadId={threadId}
             onSelect={loadConversation}
             onNew={newConversation}
+            onDelete={deleteConversation}
           />
         </div>
       </aside>
+
+      {/* 调整宽度的手柄 */}
+      <div
+        ref={resizeHandleRef}
+        onMouseDown={handleMouseDown}
+        className={cn(
+          'w-1 cursor-col-resize hover:bg-primary-300 transition-colors',
+          isResizing && 'bg-primary-400'
+        )}
+      />
 
       {/* 中间 - 聊天区域 */}
       <main className="flex-1 flex flex-col min-w-0">
