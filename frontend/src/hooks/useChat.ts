@@ -143,6 +143,13 @@ export function useChat() {
                     timestamp: new Date().toISOString(),
                   })
                 }
+                // 更新最终状态和 todo_list
+                if (event.data?.status) {
+                  setTaskStatus(event.data.status)
+                }
+                if (event.data?.todo_list) {
+                  setTodoList(event.data.todo_list)
+                }
                 break
 
               case 'error':

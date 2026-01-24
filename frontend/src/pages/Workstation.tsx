@@ -18,6 +18,7 @@ export function Workstation() {
     threadId,
     messages,
     todoList,
+    taskStatus,
     pendingConfig,
     inputValue,
     isLoading,
@@ -44,7 +45,7 @@ export function Workstation() {
           task_id: '1',
           thread_id: threadId || '',
           title: messages[0]?.content.slice(0, 30) || 'New Task',
-          status: 'running' as const,
+          status: taskStatus,
           progress: Math.round(
             (todoList.filter((s) => s.status === 'completed').length /
               todoList.length) *

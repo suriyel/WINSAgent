@@ -270,7 +270,18 @@ async def stream_message(request: ChatRequest):
             else:
                 # 正常完成，发送完成事件
                 print(f"[DEBUG] Stream completed normally, sending done event")
-                yield f"data: {json.dumps({'type': 'done', 'thread_id': thread_id})}\n\n"
+                # 包含最终状态信息
+                done_event = {
+                    "type": "done",
+                    "thread_id": thread_id,
+                }
+                if last_state_data.get("final_status"):
+                    done_event["data"] = {"status": last_state_data["final_status"]}
+                if last_state_data.get("todo_list"):
+                    if "data" not in done_event:
+                        done_event["data"] = {}
+                    done_event["data"]["todo_list"] = last_state_data["todo_list"]
+                yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             error_event = {
