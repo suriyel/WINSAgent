@@ -24,6 +24,13 @@ export function InlineHumanInput({
   const isAuthorization = config.interrupt_type === 'authorization'
   const isParamRequired = config.interrupt_type === 'param_required'
 
+  // 参数补充场景始终可编辑，授权场景依赖 mode 状态
+  const effectiveMode = isParamRequired ? 'edit' : mode
+
+  // 调试信息
+  console.log('[InlineHumanInput] FULL config:', JSON.stringify(config, null, 2))
+  console.log('[InlineHumanInput] interrupt_type:', config.interrupt_type, '| isParamRequired:', isParamRequired, '| effectiveMode:', effectiveMode)
+
   // 初始化值
   useEffect(() => {
     const defaults: Record<string, unknown> = {}
@@ -31,11 +38,7 @@ export function InlineHumanInput({
       defaults[field.name] = config.values[field.name] ?? field.default ?? ''
     })
     setValues(defaults)
-    // 参数补充场景默认进入编辑模式
-    if (isParamRequired) {
-      setMode('edit')
-    }
-  }, [config, isParamRequired])
+  }, [config])
 
   const handleChange = (name: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -135,7 +138,7 @@ export function InlineHumanInput({
                   field={field}
                   value={values[field.name]}
                   onChange={(newValue) => handleChange(field.name, newValue)}
-                  disabled={mode === 'view'}
+                  disabled={effectiveMode === 'view'}
                 />
                 {field.description && (
                   <p className="text-xs text-text-muted mt-1">{field.description}</p>

@@ -44,11 +44,11 @@ class TodoStep(BaseModel):
 
 
 class ConfigFormField(BaseModel):
-    """配置表单字段"""
+    """配置表单字段 - 支持嵌套和集合类型"""
 
     name: str = Field(..., description="字段名称")
     label: str = Field(..., description="字段标签")
-    field_type: Literal["text", "number", "select", "switch", "chips", "textarea"] = Field(
+    field_type: Literal["text", "number", "select", "switch", "chips", "textarea", "object", "array"] = Field(
         ..., description="字段类型"
     )
     required: bool = Field(False, description="是否必填")
@@ -56,16 +56,26 @@ class ConfigFormField(BaseModel):
     options: list[dict[str, Any]] | None = Field(None, description="选项列表(select/chips)")
     placeholder: str | None = Field(None, description="占位符")
     description: str | None = Field(None, description="字段说明")
+    # 嵌套类型支持
+    children: list['ConfigFormField'] | None = Field(None, description="object 类型的子字段")
+    item_type: 'ConfigFormField | None' = Field(None, description="array 类型的元素定义")
 
 
 class PendingConfig(BaseModel):
-    """待用户填充的配置"""
+    """待用户填充的配置 - 支持两种中断场景"""
 
     step_id: str = Field(..., description="关联的步骤ID")
     title: str = Field(..., description="配置标题")
     description: str | None = Field(None, description="配置说明")
     fields: list[ConfigFormField] = Field(..., description="表单字段列表")
     values: dict[str, Any] = Field(default_factory=dict, description="用户填充的值")
+    # 中断类型
+    interrupt_type: Literal["param_required", "authorization"] = Field(
+        "authorization", description="中断类型"
+    )
+    # 授权场景专用
+    tool_name: str | None = Field(None, description="待授权的工具名")
+    tool_args: dict[str, Any] | None = Field(None, description="工具的完整参数")
 
 
 class ChatMessage(BaseModel):
@@ -130,3 +140,7 @@ class ConversationListResponse(BaseModel):
 
     conversations: list[ConversationInfo] = Field(..., description="对话列表")
     total: int = Field(..., description="总数")
+
+
+# 重建模型以支持自引用类型
+ConfigFormField.model_rebuild()

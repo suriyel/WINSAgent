@@ -120,6 +120,9 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
             description=pc.get("description"),
             fields=pc.get("fields", []),
             values=pc.get("values", {}),
+            interrupt_type=pc.get("interrupt_type", "authorization"),
+            tool_name=pc.get("tool_name"),
+            tool_args=pc.get("tool_args"),
         )
 
     # 构建响应消息
