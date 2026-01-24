@@ -19,9 +19,10 @@ WINS Agent is an AI task orchestration platform built on **LangGraph 1.0** and *
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate  # Windows
+venv\Scripts\activate  # Windows: source venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload  # http://localhost:8000
+python run.py  # http://localhost:8000 (uses config from .env)
+# Alternative: python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Frontend
@@ -30,8 +31,11 @@ cd frontend
 npm install
 npm run dev  # http://localhost:3000, proxies /api to backend
 npm run lint  # ESLint
-npm run build  # Production build
+npm run build  # TypeScript check + production build
+npm run preview  # Preview production build
 ```
+
+**Note:** Vite config uses `@/` as path alias for `./src/`
 
 ### Full Stack
 ```bash
@@ -154,6 +158,10 @@ Required in `backend/.env` (copy from `.env.example`):
 - `REDIS_URL` - For production checkpointing
 
 Dev uses InMemorySaver (state lost on restart). Production requires Redis.
+
+**API Docs:** http://localhost:8000/docs (Swagger UI)
+
+**Note:** No test suite currently exists. When adding tests, create `backend/tests/` and `frontend/src/**/*.test.tsx`.
 
 ## Adding New Tools
 
