@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, START, END
+from pydantic_core import PydanticUndefined
 
 from .state import (
     AgentState,
@@ -35,9 +36,11 @@ EXECUTOR_SYSTEM_PROMPT = """你是任务执行专家。根据步骤描述调用�
 {tool_hint}
 
 执行规则:
-1. 从对话上下文推断工具参数
-2. 参数不完整时，使用合理默认值
-3. 无需工具时直接给出结果
+1. 从对话上下文推断工具参数。
+2. 如果当前步骤指定了工具，**必须**发起工具调用（tool_call）。
+3. 如果必需参数缺失，请在 tool_call 中仅包含已知参数，不要猜测缺失的参数。
+4. 严禁通过直接回复文本来询问缺失参数，必须通过工具调用触发系统处理。
+5. 如果用户需求不明确，请在 tool_call 中留空缺失的必需参数，系统会自动引导用户补充。
 """
 
 
@@ -155,12 +158,16 @@ def generate_field_from_annotation(
     """
     field_type, extra = annotation_to_field_type(annotation)
 
+    default_value = field_info.default
+    if default_value is PydanticUndefined:
+        default_value = None
+
     base_field = {
         "name": field_name,
         "label": field_info.description or field_name if field_info else field_name,
         "field_type": field_type,
         "required": field_info.is_required() if field_info else False,
-        "default": field_info.default if field_info and field_info.default is not None else None,
+        "default": default_value,
         "options": None,
         "placeholder": f"请输入{field_info.description or field_name}" if field_info else None,
         "description": field_info.description if field_info else None,
