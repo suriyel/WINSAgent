@@ -111,6 +111,8 @@ export function TaskPanel({ tasks, className }: TaskPanelProps) {
                               ? 'bg-secondary-400'
                               : step.status === 'failed'
                               ? 'bg-error-400'
+                              : step.status === 'skipped'
+                              ? 'bg-amber-400'
                               : 'bg-gray-200'
                           )}
                         />

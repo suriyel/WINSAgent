@@ -1,5 +1,5 @@
 // 任务步骤状态
-export type TodoStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type TodoStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
 // 任务整体状态
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting_input'
@@ -9,6 +9,29 @@ export type HumanInputAction = 'approve' | 'edit' | 'reject'
 
 // HITL 中断类型
 export type InterruptType = 'param_required' | 'authorization'
+
+// 重规划触发原因
+export type ReplanTriggerReason =
+  | 'max_retries_exceeded'
+  | 'goal_achieved_early'
+  | 'alternative_approach_needed'
+  | 'user_requested'
+  | 'dependency_failed'
+
+// 重规划上下文
+export interface ReplanContext {
+  trigger_reason: ReplanTriggerReason
+  failed_step_id?: string | null
+  failed_step_error?: string | null
+  completed_results: Array<{
+    step_id: string
+    description: string
+    result: string
+  }>
+  remaining_steps: string[]
+  replan_count: number
+  original_intent: string
+}
 
 // TODO 步骤
 export interface TodoStep {
@@ -22,6 +45,7 @@ export interface TodoStep {
   started_at?: string | null
   completed_at?: string | null
   progress: number
+  retry_count?: number
 }
 
 // 配置表单字段 - 支持嵌套和集合类型

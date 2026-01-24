@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, Loader2, XCircle, SkipForward } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import type { TodoStep, TodoStatus } from '@/types'
 
@@ -31,10 +31,17 @@ const statusConfig: Record<
     color: 'text-error-400',
     lineColor: 'bg-error-400',
   },
+  skipped: {
+    icon: <SkipForward className="w-6 h-6" />,
+    color: 'text-amber-400',
+    lineColor: 'bg-amber-300',
+  },
 }
 
 export function TodoProgress({ steps, currentStep }: TodoProgressProps) {
   const completedCount = steps.filter((s) => s.status === 'completed').length
+  const skippedCount = steps.filter((s) => s.status === 'skipped').length
+  const finishedCount = completedCount + skippedCount
   const totalCount = steps.length
 
   return (
@@ -43,7 +50,8 @@ export function TodoProgress({ steps, currentStep }: TodoProgressProps) {
       <div className="flex items-center justify-between mb-4">
         <span className="font-medium text-text-primary">Step {currentStep + 1}/{totalCount}</span>
         <span className="text-sm text-text-muted">
-          {Math.round((completedCount / totalCount) * 100)}%
+          {Math.round((finishedCount / totalCount) * 100)}%
+          {skippedCount > 0 && <span className="text-amber-500 ml-1">({skippedCount} skipped)</span>}
         </span>
       </div>
 
@@ -51,7 +59,7 @@ export function TodoProgress({ steps, currentStep }: TodoProgressProps) {
       <div className="h-1 bg-gray-100 rounded-full mb-6 overflow-hidden">
         <div
           className="h-full bg-gradient-to-r from-primary-400 to-secondary-400 rounded-full transition-all duration-500"
-          style={{ width: `${(completedCount / totalCount) * 100}%` }}
+          style={{ width: `${(finishedCount / totalCount) * 100}%` }}
         />
       </div>
 
@@ -89,6 +97,8 @@ export function TodoProgress({ steps, currentStep }: TodoProgressProps) {
                       ? 'text-secondary-600'
                       : step.status === 'failed'
                       ? 'text-error-600'
+                      : step.status === 'skipped'
+                      ? 'text-amber-600 line-through'
                       : 'text-text-muted'
                   )}
                 >

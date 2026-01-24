@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
+import { ChevronDown, ChevronUp, CheckCircle2, Circle, Loader2, XCircle, SkipForward } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/utils/cn'
 import type { TodoStep, TodoStatus } from '@/types'
@@ -33,12 +33,20 @@ const statusConfig: Record<
     color: 'text-error-400',
     bg: 'bg-error-50',
   },
+  skipped: {
+    icon: <SkipForward className="w-5 h-5" />,
+    color: 'text-amber-400',
+    bg: 'bg-amber-50',
+  },
 }
 
 export function TodoList({ steps, className }: TodoListProps) {
   const [isExpanded, setIsExpanded] = useState(true)
 
+  // completed + skipped = finished
   const completedCount = steps.filter((s) => s.status === 'completed').length
+  const skippedCount = steps.filter((s) => s.status === 'skipped').length
+  const finishedCount = completedCount + skippedCount
   const totalCount = steps.length
 
   return (
@@ -51,7 +59,8 @@ export function TodoList({ steps, className }: TodoListProps) {
         <div className="flex items-center gap-2">
           <span className="font-medium text-text-primary">TODO task list</span>
           <span className="text-sm text-text-muted">
-            {completedCount}/{totalCount}
+            {finishedCount}/{totalCount}
+            {skippedCount > 0 && <span className="text-amber-500 ml-1">({skippedCount} skipped)</span>}
           </span>
         </div>
         {isExpanded ? (
