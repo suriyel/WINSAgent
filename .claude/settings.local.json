@@ -4,7 +4,8 @@
       "Bash(dir /b \"D:\\\\03PyDemo\\\\WINSAgent\")",
       "mcp__context7__resolve-library-id",
       "mcp__context7__query-docs",
-      "Bash(xargs -I {} bash -c 'echo \"\"=== {} ===\"\" && head -20 {}')"
+      "Bash(xargs -I {} bash -c 'echo \"\"=== {} ===\"\" && head -20 {}')",
+      "Bash(python:*)"
     ]
   }
 }

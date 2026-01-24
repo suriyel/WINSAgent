@@ -8,7 +8,13 @@ from langchain_core.messages import SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, START, END
 
-from .state import AgentState, TodoStep, PendingConfigField
+from .state import (
+    AgentState,
+    TodoStep,
+    PendingConfigField,
+    create_replan_context,
+    skip_remaining_steps,
+)
 from .llm import get_llm, get_llm_with_tools
 from .context_manager import get_context_manager
 from .hitl import (
@@ -18,6 +24,7 @@ from .hitl import (
     create_param_required_config as hitl_create_param_required_config,
     create_user_input_config,
 )
+from .goal_evaluator import should_evaluate_goal, evaluate_goal_completion
 from app.tools.base import ToolRegistry
 from app.config import get_settings
 
@@ -429,6 +436,9 @@ def execute_tool_directly(
             progress=100,
         )
 
+        # 更新 step 以包含结果，用于目标评估
+        completed_step = {**step, "status": "completed", "result": str(tool_result)}
+
         messages_to_add = []
         if ai_response:
             messages_to_add.append(ai_response)
@@ -440,7 +450,7 @@ def execute_tool_directly(
         else:
             messages_to_add.append(AIMessage(content=f"工具执行结果: {tool_result}"))
 
-        return {
+        result = {
             "messages": messages_to_add,
             "todo_list": updated_list,
             "current_step": state.get("current_step", 0) + 1,
@@ -448,6 +458,24 @@ def execute_tool_directly(
             "pending_config": None,
             "final_status": "running",
         }
+
+        # 目标提前达成检测
+        if settings.goal_evaluation_enabled:
+            # 创建临时 state 用于评估
+            temp_state = {**state, "todo_list": updated_list}
+            if should_evaluate_goal(completed_step, temp_state):
+                print(f"[EXECUTOR] Evaluating goal completion after step {step_id}")
+                evaluation = evaluate_goal_completion(temp_state, completed_step)
+
+                if evaluation.get("goal_achieved"):
+                    print(f"[EXECUTOR] Goal achieved early: {evaluation.get('explanation')}")
+                    # 跳过剩余步骤
+                    skipped_list = skip_remaining_steps(updated_list, step_id)
+                    result["todo_list"] = skipped_list
+                    result["goal_achieved"] = True
+                    result["goal_evaluation_result"] = evaluation.get("explanation", "")
+
+        return result
 
     except Exception as e:
         # 执行失败
@@ -467,15 +495,36 @@ def execute_tool_directly(
                 "current_agent": "executor",
             }
         else:
+            # 达到最大重试次数
             updated_list = update_step_status(
                 todo_list, step_id, "failed",
                 error=f"执行失败: {str(e)}，已达最大重试次数",
             )
-            return {
+
+            result = {
                 "todo_list": updated_list,
                 "error_info": str(e),
                 "current_agent": "executor",
             }
+
+            # 检查是否触发重规划
+            if settings.replan_enabled and settings.replan_on_max_retries:
+                # 获取当前重规划次数
+                current_replan_count = state.get("replan_context", {}).get("replan_count", 0) if state.get("replan_context") else 0
+
+                if current_replan_count < settings.max_replans:
+                    print(f"[EXECUTOR] Triggering replan after max retries for step {step_id}")
+                    replan_ctx = create_replan_context(
+                        trigger_reason="max_retries_exceeded",
+                        todo_list=updated_list,
+                        original_intent=state.get("parsed_intent", ""),
+                        failed_step_id=step_id,
+                        failed_step_error=str(e),
+                        replan_count=current_replan_count,
+                    )
+                    result["replan_context"] = replan_ctx
+
+            return result
 
 
 def execute_tool_with_llm(
@@ -610,11 +659,30 @@ def execute_tool_with_llm(
                 todo_list, step_id, "failed",
                 error=f"执行失败: {str(e)}，已达最大重试次数",
             )
-            return {
+
+            result = {
                 "todo_list": updated_list,
                 "error_info": str(e),
                 "current_agent": "executor",
             }
+
+            # 检查是否触发重规划
+            if settings.replan_enabled and settings.replan_on_max_retries:
+                current_replan_count = state.get("replan_context", {}).get("replan_count", 0) if state.get("replan_context") else 0
+
+                if current_replan_count < settings.max_replans:
+                    print(f"[EXECUTOR] Triggering replan after max retries for step {step_id}")
+                    replan_ctx = create_replan_context(
+                        trigger_reason="max_retries_exceeded",
+                        todo_list=updated_list,
+                        original_intent=state.get("parsed_intent", ""),
+                        failed_step_id=step_id,
+                        failed_step_error=str(e),
+                        replan_count=current_replan_count,
+                    )
+                    result["replan_context"] = replan_ctx
+
+            return result
 
 
 def execute_with_tool_selection(
@@ -744,10 +812,22 @@ def should_continue(state: AgentState) -> str:
     current_step = state.get("current_step", 0)
     todo_list = state.get("todo_list", [])
     final_status = state.get("final_status")
+    replan_context = state.get("replan_context")
+    goal_achieved = state.get("goal_achieved", False)
 
+    # 等待输入或失败时结束
     if final_status in ["failed", "waiting_input"]:
         return "end"
 
+    # 有重规划上下文时结束（让 supervisor 路由到 replanner）
+    if replan_context:
+        return "end"
+
+    # 目标提前达成时结束
+    if goal_achieved:
+        return "end"
+
+    # 所有步骤执行完毕
     if current_step >= len(todo_list):
         return "end"
 

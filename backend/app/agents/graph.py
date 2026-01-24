@@ -14,6 +14,7 @@ from .supervisor import supervisor_node, route_supervisor
 from .planner import planner_node
 from .executor import executor_node
 from .validator import validator_node
+from .replanner import replanner_node
 from app.config import get_settings
 from app.tools.base import get_default_tools
 
@@ -45,10 +46,13 @@ def build_agent_graph(
     builder.add_node("executor", executor_with_tools)
     builder.add_node("validator", validator_node)
 
+    # 添加 Replanner 节点（动态重规划）
+    builder.add_node("replanner", replanner_node)
+
     # 入口边
     builder.add_edge(START, "supervisor")
 
-    # Supervisor 条件路由
+    # Supervisor 条件路由（包含 replanner）
     builder.add_conditional_edges(
         "supervisor",
         route_supervisor,
@@ -56,6 +60,7 @@ def build_agent_graph(
             "planner": "planner",
             "executor": "executor",
             "validator": "validator",
+            "replanner": "replanner",
             "end": END,
         },
     )
@@ -63,6 +68,7 @@ def build_agent_graph(
     # SubGraph 返回 Supervisor
     builder.add_edge("planner", "supervisor")
     builder.add_edge("executor", "supervisor")
+    builder.add_edge("replanner", "supervisor")  # Replanner 返回 Supervisor
     builder.add_edge("validator", END)
 
     # 编译参数

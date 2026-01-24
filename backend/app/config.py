@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # 是否对所有工具都要求授权
     require_approval_for_all_tools: bool = False
 
+    # 动态重规划配置
+    replan_enabled: bool = True  # 是否启用重规划功能
+    max_replans: int = 3  # 最大重规划次数
+    goal_evaluation_enabled: bool = True  # 是否启用目标提前达成检测
+    replan_on_max_retries: bool = True  # 达到最大重试次数时是否触发重规划
+
     @property
     def mysql_url(self) -> str:
         """同步 MySQL URL"""

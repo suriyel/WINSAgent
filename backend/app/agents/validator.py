@@ -49,6 +49,7 @@ def build_step_details(todo_list: list[TodoStep]) -> str:
             "failed": "❌",
             "running": "🔄",
             "pending": "⏳",
+            "skipped": "⏭️",
         }.get(step["status"], "❓")
 
         detail = f"{i}. {status_icon} {step['description']}"
@@ -113,20 +114,28 @@ def validator_node(state: AgentState) -> dict:
     todo_list = state.get("todo_list", [])
     error_info = state.get("error_info")
     parsed_intent = state.get("parsed_intent", "")
+    goal_achieved = state.get("goal_achieved", False)
+    goal_evaluation_result = state.get("goal_evaluation_result", "")
 
     # 统计执行结果
     completed = sum(1 for s in todo_list if s["status"] == "completed")
     failed = sum(1 for s in todo_list if s["status"] == "failed")
     pending = sum(1 for s in todo_list if s["status"] == "pending")
     running = sum(1 for s in todo_list if s["status"] == "running")
+    skipped = sum(1 for s in todo_list if s["status"] == "skipped")
     total = len(todo_list)
 
     # 构建统计信息
     stats = f"""- 总步骤数：{total}
 - 已完成：{completed}
+- 跳过：{skipped}
 - 失败：{failed}
 - 进行中：{running}
 - 待执行：{pending}"""
+
+    # 如果目标提前达成，添加说明
+    if goal_achieved:
+        stats += f"\n- 目标提前达成：{goal_evaluation_result}"
 
     # 构建步骤详情
     step_details = build_step_details(todo_list)
@@ -159,13 +168,16 @@ def validator_node(state: AgentState) -> dict:
 
     response = llm.invoke(messages)
 
-    # 判定最终状态
+    # 判定最终状态（考虑 skipped 步骤）
+    finished_count = completed + skipped  # 完成 + 跳过 = 实际处理完毕
+
     if failed > 0 and completed == 0:
         final_status = "failed"
     elif failed > 0 and completed > 0:
         # 部分成功也标记为 failed，但在消息中说明
         final_status = "failed"
-    elif completed == total and total > 0:
+    elif finished_count == total and total > 0:
+        # 全部完成（包括跳过的）= 成功
         final_status = "success"
     elif pending > 0 or running > 0:
         final_status = "running"
@@ -173,11 +185,15 @@ def validator_node(state: AgentState) -> dict:
         final_status = "success"
 
     # 构建最终消息
-    status_label = {
-        "success": "✅ 任务完成",
-        "failed": "❌ 任务失败" if completed == 0 else "⚠️ 部分完成",
-        "running": "🔄 执行中",
-    }.get(final_status, "❓ 未知状态")
+    if goal_achieved and skipped > 0:
+        # 目标提前达成
+        status_label = "✅ 目标提前达成"
+    else:
+        status_label = {
+            "success": "✅ 任务完成",
+            "failed": "❌ 任务失败" if completed == 0 else "⚠️ 部分完成",
+            "running": "🔄 执行中",
+        }.get(final_status, "❓ 未知状态")
 
     final_message = f"**{status_label}**\n\n{response.content}"
 
@@ -186,6 +202,8 @@ def validator_node(state: AgentState) -> dict:
         "final_status": final_status,
         "current_agent": "validator",
         "pending_config": None,  # 清除待处理配置
+        "goal_achieved": False,  # 重置目标达成标记
+        "replan_context": None,  # 清除重规划上下文
     }
 
 

@@ -46,21 +46,26 @@ scripts\start-dev.bat   # Windows
 User Input → [Supervisor] → routes to:
   ├→ [Planner] - Intent parsing, task decomposition
   ├→ [Executor] - Tool invocation (interrupt_before for HITL)
+  │     ├→ (success) → Goal Evaluator → skip remaining if goal achieved
+  │     └→ (failure after max retries) → Create ReplanContext
+  ├→ [Replanner] - Generate revised plan on failure (NEW)
   └→ [Validator] - Result validation, error attribution
 ```
 
 ### Key Backend Modules (`backend/app/`)
-- **`agents/state.py`** - AgentState TypedDict (messages, todo_list, pending_config)
+- **`agents/state.py`** - AgentState TypedDict (messages, todo_list, pending_config, replan_context, goal_achieved)
 - **`agents/graph.py`** - StateGraph assembly with interrupt handling
 - **`agents/hitl.py`** - HITL protocol: HITLAction enum, encoder/decoder, config builders
-- **`agents/supervisor.py`** - Routing & coordination
+- **`agents/supervisor.py`** - Routing & coordination (planner/executor/replanner/validator)
 - **`agents/planner.py`** - Task decomposition
-- **`agents/executor.py`** - Tool execution with HITL interrupts
+- **`agents/executor.py`** - Tool execution with HITL interrupts, replan triggers, goal evaluation
+- **`agents/replanner.py`** - Dynamic replanning on failure (NEW)
+- **`agents/goal_evaluator.py`** - Early goal completion detection (NEW)
 - **`agents/context_manager.py`** - Token budget, message compression, tool metadata trimming
 - **`tools/base.py`** - ToolRegistry and @tool decorators
 - **`knowledge/retriever.py`** - RAG with FAISS + DashScope
 - **`api/chat.py`** - `/chat/stream` (SSE), `/chat/resume/{thread_id}`, `/chat/state/{thread_id}`
-- **`config.py`** - Environment settings, token limits (4000 tokens)
+- **`config.py`** - Environment settings, token limits (4000 tokens), replan config
 
 ### Key Frontend Modules (`frontend/src/`)
 - **`stores/chatStore.ts`** - Zustand store (threadId, messages, todoList, pendingConfig)
@@ -94,6 +99,42 @@ The `ContextManager` class handles token budget enforcement:
 - `trim_tool_metadata()` - Removes verbose internal metadata from ToolMessages
 - `enforce_token_budget()` - Trims middle messages, preserving first and recent
 - `optimize_context()` - Applies all three in sequence
+
+### Dynamic Replanning (`agents/replanner.py`, `agents/goal_evaluator.py`)
+
+Intelligent task recovery and early completion detection:
+
+**Components:**
+- `ReplanContext`: Captures failure context (trigger_reason, failed_step, completed_results)
+- `replanner_node`: LLM-powered plan revision with 4 strategies
+- `goal_evaluator`: Detects early goal completion to skip unnecessary steps
+
+**Replan Strategies:**
+| Strategy | When Used | Action |
+|----------|-----------|--------|
+| `replace_failed` | Tool-specific error | Replace step with alternative tool |
+| `alternative_approach` | Approach fundamentally broken | Redesign remaining steps |
+| `skip_failed` | Step not critical | Mark as skipped, continue |
+| `abort` | Unrecoverable | Go to validator with failure |
+
+**Flow:**
+1. Step fails after max retries → Executor creates `ReplanContext`
+2. Supervisor routes to Replanner node
+3. Replanner generates revised plan using LLM
+4. Merged plan resumes execution from Supervisor
+
+**Goal Evaluation (on-demand):**
+1. Step completes successfully with success indicators ("完成", "成功", etc.)
+2. `should_evaluate_goal()` heuristic triggers evaluation
+3. LLM evaluates if original intent is satisfied
+4. If goal achieved → remaining steps marked as "skipped" → Validator
+
+**TodoStep Status Values:**
+- `pending` - Not yet started
+- `running` - Currently executing
+- `completed` - Successfully finished
+- `failed` - Failed after retries
+- `skipped` - Skipped (goal achieved early or replanning)
 
 ## API Endpoints (v1)
 
@@ -136,6 +177,12 @@ Key settings:
 - `recursion_limit: int = 25` - LangGraph recursion limit
 - `tools_require_approval: list[str]` - Tools requiring HITL authorization
 - `require_approval_for_all_tools: bool` - Global HITL flag
+
+**Dynamic Replanning Settings:**
+- `replan_enabled: bool = True` - Enable/disable replanning feature
+- `max_replans: int = 3` - Maximum replan attempts per task
+- `goal_evaluation_enabled: bool = True` - Enable/disable early goal detection
+- `replan_on_max_retries: bool = True` - Trigger replan when step hits max retries
 
 ## Design System
 
