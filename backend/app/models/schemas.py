@@ -15,6 +15,7 @@ class TodoStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class TaskStatus(str, Enum):
