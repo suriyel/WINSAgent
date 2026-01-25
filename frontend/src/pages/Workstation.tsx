@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Bot, GripVertical } from 'lucide-react'
+import { Bot } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import {
   ConversationList,

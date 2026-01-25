@@ -71,8 +71,10 @@ export function ConversationList({
                     {conv.title}
                   </p>
                   {conv.last_message && (
-                    <p className="text-sm text-text-muted truncate mt-0.5">
-                      {conv.last_message}
+                    <p className="text-sm text-text-muted truncate mt-0.5" title={conv.last_message}>
+                      {conv.last_message.length > 40
+                        ? `${conv.last_message.slice(0, 40)}...`
+                        : conv.last_message}
                     </p>
                   )}
                 </div>

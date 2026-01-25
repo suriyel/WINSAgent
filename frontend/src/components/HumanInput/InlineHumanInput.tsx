@@ -22,10 +22,6 @@ export function InlineHumanInput({
   const [values, setValues] = useState<Record<string, unknown>>({})
 
   const isAuthorization = config.interrupt_type === 'authorization'
-  const isParamRequired = config.interrupt_type === 'param_required'
-
-  // 参数补充场景始终可编辑，授权场景依赖 mode 状态
-  const effectiveMode = isParamRequired ? 'edit' : mode
 
   // 初始化值
   useEffect(() => {
@@ -134,7 +130,6 @@ export function InlineHumanInput({
                   field={field}
                   value={values[field.name]}
                   onChange={(newValue) => handleChange(field.name, newValue)}
-                  disabled={effectiveMode === 'view'}
                 />
                 {field.description && (
                   <p className="text-xs text-text-muted mt-1">{field.description}</p>

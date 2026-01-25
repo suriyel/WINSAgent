@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import { Send, Paperclip } from 'lucide-react'
 import { cn } from '@/utils/cn'
 
