@@ -152,15 +152,6 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
         )
 
     # 转换完整消息历史（用于加载历史会话）
-    # HITL 协议前缀列表 - 这些是内部消息，不显示给用户
-    HITL_PREFIXES = [
-        "HITL_APPROVED:",
-        "HITL_EDITED:",
-        "HITL_PARAM:",
-        "HITL_REJECTED:",
-        "HITL_CANCELLED:",
-    ]
-
     chat_messages = []
     for msg in messages:
         # 跳过没有实际内容的系统消息
@@ -169,14 +160,11 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
         # 跳过 ToolMessage（工具调用结果在消息中以其他方式展示）
         if hasattr(msg, "tool_name") and msg.tool_name:
             continue
-        # 跳过 HITL 协议消息（内部消息，不显示给用户）
-        content = msg.content if msg.content else ""
-        if any(content.startswith(prefix) for prefix in HITL_PREFIXES):
-            continue
         # 跳过标记为 internal 的消息（通过 metadata 标记）
         if hasattr(msg, "metadata") and msg.metadata.get("internal"):
             continue
         # 跳过空消息
+        content = msg.content if msg.content else ""
         if not content or content.isspace():
             continue
 

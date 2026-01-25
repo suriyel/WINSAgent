@@ -120,7 +120,7 @@ class HITLMessageEncoder:
             raise ValueError(f"Unhandled HITL action: {action}")
 
         content = f"{prefix}{json.dumps(payload, ensure_ascii=False)}"
-        return HumanMessage(content=content)
+        return HumanMessage(content=content, additional_kwargs={"metadata": {"internal": True}})
 
 
 class HITLMessageDecoder:
