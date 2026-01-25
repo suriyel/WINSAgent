@@ -67,17 +67,23 @@ User Input → [Supervisor] → routes to:
 - **`agents/goal_evaluator.py`** - Early goal completion detection (NEW)
 - **`agents/context_manager.py`** - Token budget, message compression, tool metadata trimming
 - **`tools/base.py`** - ToolRegistry and @tool decorators
-- **`knowledge/retriever.py`** - RAG with FAISS + DashScope
+- **`knowledge/retriever.py`** - RAG with FAISS + DashScope (model: text-embedding-v3)
 - **`api/chat.py`** - `/chat/stream` (SSE), `/chat/resume/{thread_id}`, `/chat/state/{thread_id}`
+- **`api/conversations.py`** - Conversation CRUD with Redis state cleanup
+- **`api/tasks.py`** - Task persistence
+- **`api/knowledge.py`** - Knowledge base management
+- **`api/tools.py`** - Tool listing
 - **`config.py`** - Environment settings, token limits (4000 tokens), replan config
 
 ### Key Frontend Modules (`frontend/src/`)
 - **`stores/chatStore.ts`** - Zustand store (threadId, messages, todoList, pendingConfig)
 - **`types/index.ts`** - TypeScript interfaces
-- **`pages/Workstation.tsx`** - Main 3-column layout
+- **`pages/Workstation.tsx`** - Main 3-column layout with resizable sidebar (200px-500px, persisted to localStorage)
 - **`hooks/useChat.ts`** - SSE streaming, submit/approve/reject config handlers
 - **`components/ConfigModal/`** - Dynamic form for HITL interrupts
 - **`components/TodoList/`** - Task steps with progress visualization
+- **`components/HumanInput/InlineHumanInput.tsx`** - Inline HITL input (alternative to ConfigModal)
+- **`utils/cn.ts`** - `clsx` + `tailwind-merge` utility for className merging
 
 ### Human-in-the-Loop Protocol (`agents/hitl.py`)
 
@@ -88,6 +94,10 @@ Centralized HITL communication with type-safe encoding/decoding:
 - `HITLMessageEncoder`: Encodes user actions to HumanMessage for graph state
 - `HITLMessageDecoder`: Decodes HumanMessage to HITLResumeData for executor
 - Config builders: `create_authorization_config()`, `create_param_required_config()`, `create_user_input_config()`
+
+**Interrupt Types:**
+- `authorization` - Tool execution authorization required
+- `param_required` - Missing required parameters
 
 **Flow:**
 1. Executor creates `pending_config` using config builders, sets `final_status="waiting_input"`
@@ -103,6 +113,20 @@ The `ContextManager` class handles token budget enforcement:
 - `trim_tool_metadata()` - Removes verbose internal metadata from ToolMessages
 - `enforce_token_budget()` - Trims middle messages, preserving first and recent
 - `optimize_context()` - Applies all three in sequence
+
+### State Helpers (`agents/state.py`)
+Utility functions for state management:
+- `create_initial_state()` - Creates default AgentState
+- `create_todo_step()` - Creates a TodoStep
+- `create_replan_context()` - Creates ReplanContext
+- `skip_remaining_steps()` - Marks remaining steps as skipped
+
+### Tool Registry (`tools/base.py`)
+The `ToolRegistry` class manages tool registration:
+- `register()` - Register a tool (auto-called by @tool decorator)
+- `get(name)` - Get a specific tool
+- `get_all()` - Get all registered tools
+- `clear()` - Clear all registered tools
 
 ### Dynamic Replanning (`agents/replanner.py`, `agents/goal_evaluator.py`)
 
@@ -142,20 +166,70 @@ Intelligent task recovery and early completion detection:
 
 ## API Endpoints (v1)
 
-- `POST /chat/stream` - Send message with SSE streaming
-- `POST /chat/resume/{thread_id}` - Resume after interrupt
+**Chat API:**
+- `POST /api/v1/chat/stream` - Send message with SSE streaming
+- `POST /api/v1/chat/resume/{thread_id}` - Resume after interrupt
   - Body: `{action: "approve"|"edit"|"confirm"|"reject"|"cancel", ...values}`
   - Supports legacy `_action` field for backward compatibility
-- `GET /chat/state/{thread_id}` - Get conversation state
-- `GET /tools/` - List available tools
-- `POST /knowledge/search` - Search knowledge base
+- `GET /api/v1/chat/state/{thread_id}` - Get conversation state
+
+**Conversations API:**
+- `GET /api/v1/conversations/` - List conversations (query: `skip`, `limit`)
+- `GET /api/v1/conversations/{thread_id}` - Get conversation details
+- `POST /api/v1/conversations/create` - Create new conversation
+- `PUT /api/v1/conversations/{thread_id}` - Update conversation (title, last_message)
+- `DELETE /api/v1/conversations/{thread_id}` - Delete conversation (also clears Redis state)
+
+**Tasks API:**
+- `GET /api/v1/tasks/` - List tasks (query: `skip`, `limit`)
+- `GET /api/v1/tasks/{task_id}` - Get task details
+- `POST /api/v1/tasks/create` - Create new task
+- `PUT /api/v1/tasks/{task_id}/status` - Update task status
+- `DELETE /api/v1/tasks/{task_id}` - Delete task
+- `GET /api/v1/tasks/{task_id}/steps` - Get task steps
+
+**Knowledge API:**
+- `POST /api/v1/knowledge/search` - Search knowledge base
+- `POST /api/v1/knowledge/add` - Add document to knowledge base
+- `POST /api/v1/knowledge/upload` - Upload .txt/.md files (UTF-8, chunked by paragraph)
+- `DELETE /api/v1/knowledge/clear` - Clear entire knowledge base
+- `GET /api/v1/knowledge/stats` - Get knowledge base statistics
+
+**Tools API:**
+- `GET /api/v1/tools/` - List all tools with approval status
+- `GET /api/v1/tools/{name}` - Get tool details
+- `GET /api/v1/tools/{name}/schema` - Get tool parameter schema
+
+**Health:**
+- `GET /health` - Health check (returns status and version)
+
+**SSE Event Types:**
+- `update` - Streaming updates (node, content, todo_list, status, pending_config)
+- `interrupt` - HITL interrupt with pending_config
+- `done` - Completion with final status and todo_list
+- `error` - Error events
 
 ## Environment Configuration
 
 Required in `backend/.env` (copy from `.env.example`):
+
+**LLM:**
 - `DASHSCOPE_API_KEY` - For LLM and embeddings
-- `MYSQL_*` credentials - For task persistence
+- `LLM_MODEL` - Model name (default: qwen3-72b-instruct)
+
+**Database:**
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` - Task persistence
+
+**Redis:**
 - `REDIS_URL` - For production checkpointing
+
+**Vector Store:**
+- `FAISS_INDEX_PATH` - Path to FAISS index (default: ./data/faiss_index)
+
+**Server:**
+- `API_HOST` - Server host (default: 0.0.0.0)
+- `API_PORT` - Server port (default: 8000)
+- `DEBUG` - Debug mode flag
 
 Dev uses InMemorySaver (state lost on restart). Production requires Redis.
 
