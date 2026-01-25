@@ -99,7 +99,8 @@ class ChatResponse(BaseModel):
     """聊天响应"""
 
     thread_id: str = Field(..., description="会话线程ID")
-    message: ChatMessage = Field(..., description="助手消息")
+    message: ChatMessage = Field(..., description="助手消息（最新消息）")
+    messages: list[ChatMessage] = Field(default_factory=list, description="完整消息历史")
     todo_list: list[TodoStep] = Field(default_factory=list, description="任务步骤列表")
     pending_config: PendingConfig | None = Field(None, description="待配置项")
     task_status: TaskStatus = Field(TaskStatus.PENDING, description="任务状态")

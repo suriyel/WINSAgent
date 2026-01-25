@@ -455,7 +455,7 @@ def execute_tool_directly(
                 tool_call_id=tool_call_id,
             ))
         else:
-            messages_to_add.append(AIMessage(content=f"工具执行结果: {tool_result}"))
+            messages_to_add.append(AIMessage(content=f"工具执行结果: {tool_result}", metadata={"internal": True}))
 
         result = {
             "messages": messages_to_add,

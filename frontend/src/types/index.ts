@@ -89,6 +89,7 @@ export interface ChatMessage {
 export interface ChatResponse {
   thread_id: string
   message: ChatMessage
+  messages: ChatMessage[]  // 完整消息历史
   todo_list: TodoStep[]
   pending_config?: PendingConfig | null
   task_status: TaskStatus

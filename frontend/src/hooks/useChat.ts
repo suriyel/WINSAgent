@@ -15,7 +15,6 @@ export function useChat() {
     isLoading,
     setThreadId,
     addMessage,
-    setMessages,
     setTodoList,
     setTaskStatus,
     setPendingConfig,
@@ -23,6 +22,7 @@ export function useChat() {
     setIsLoading,
     reset,
     setConversations,
+    setMessages,
   } = useChatStore()
 
   // 获取对话列表 - 必须在其他使用它的回调之前定义
@@ -371,7 +371,7 @@ export function useChat() {
         if (response.ok) {
           const data: ChatResponse = await response.json()
           setThreadId(data.thread_id)
-          // Note: messages 需要从其他地方获取
+          setMessages(data.messages)
           setTodoList(data.todo_list)
           setTaskStatus(data.task_status)
           setPendingConfig(data.pending_config || null)
@@ -382,7 +382,7 @@ export function useChat() {
         setIsLoading(false)
       }
     },
-    [setThreadId, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
+    [setThreadId, setMessages, setTodoList, setTaskStatus, setPendingConfig, setIsLoading]
   )
 
   return {

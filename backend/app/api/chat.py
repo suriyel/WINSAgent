@@ -151,6 +151,50 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
             tool_args=pc.get("tool_args"),
         )
 
+    # 转换完整消息历史（用于加载历史会话）
+    # HITL 协议前缀列表 - 这些是内部消息，不显示给用户
+    HITL_PREFIXES = [
+        "HITL_APPROVED:",
+        "HITL_EDITED:",
+        "HITL_PARAM:",
+        "HITL_REJECTED:",
+        "HITL_CANCELLED:",
+    ]
+
+    chat_messages = []
+    for msg in messages:
+        # 跳过没有实际内容的系统消息
+        if msg.type == "system" and not msg.content:
+            continue
+        # 跳过 ToolMessage（工具调用结果在消息中以其他方式展示）
+        if hasattr(msg, "tool_name") and msg.tool_name:
+            continue
+        # 跳过 HITL 协议消息（内部消息，不显示给用户）
+        content = msg.content if msg.content else ""
+        if any(content.startswith(prefix) for prefix in HITL_PREFIXES):
+            continue
+        # 跳过标记为 internal 的消息（通过 metadata 标记）
+        if hasattr(msg, "metadata") and msg.metadata.get("internal"):
+            continue
+        # 跳过空消息
+        if not content or content.isspace():
+            continue
+
+        role_map = {
+            "human": "user",
+            "ai": "assistant",
+            "system": "system",
+        }
+        role = role_map.get(msg.type, "assistant")
+
+        chat_messages.append(
+            ChatMessage(
+                role=role,
+                content=content,
+                timestamp=datetime.now(),  # 使用当前时间，因为 LangChain 消息可能没有 timestamp
+            )
+        )
+
     # 构建响应消息
     response_message = ChatMessage(
         role="assistant",
@@ -172,6 +216,7 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
     return ChatResponse(
         thread_id=thread_id,
         message=response_message,
+        messages=chat_messages,
         todo_list=todo_list,
         pending_config=pending_config,
         task_status=task_status,
@@ -411,7 +456,7 @@ async def resume_chat(thread_id: str, config_values: dict):
                         step["error"] = "用户取消" if action == HITLAction.CANCEL else "用户拒绝"
                         break
 
-            reject_msg = AIMessage(content="已取消此操作。")
+            reject_msg = AIMessage(content="已取消此操作。", metadata={"internal": True})
 
             # 使用 HITLMessageEncoder 创建取消消息（用于状态记录）
             hitl_msg = HITLMessageEncoder.encode(

@@ -176,7 +176,7 @@ def planner_node(state: AgentState) -> dict:
     plan_summary = f"**任务规划完成**\n\n目标：{parsed_intent}\n\n已生成 {len(todo_list)} 个执行步骤。"
 
     return {
-        "messages": [AIMessage(content=plan_summary)],
+        "messages": [AIMessage(content=plan_summary, metadata={"internal": True})],
         "parsed_intent": parsed_intent,
         "todo_list": todo_list,
         "current_step": 0,
