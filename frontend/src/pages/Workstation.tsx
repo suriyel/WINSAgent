@@ -133,6 +133,7 @@ export function Workstation() {
             onSelect={loadConversation}
             onNew={newConversation}
             onDelete={deleteConversation}
+            sidebarWidth={sidebarWidth}
           />
         </div>
       </aside>

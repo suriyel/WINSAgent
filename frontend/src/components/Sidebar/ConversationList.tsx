@@ -8,6 +8,7 @@ interface ConversationListProps {
   onSelect: (threadId: string) => void
   onNew: () => void
   onDelete?: (threadId: string) => void
+  sidebarWidth: number
 }
 
 export function ConversationList({
@@ -16,7 +17,12 @@ export function ConversationList({
   onSelect,
   onNew,
   onDelete,
+  sidebarWidth,
 }: ConversationListProps) {
+  // 根据侧边栏宽度动态计算消息长度限制
+  // 基础 20 个字符，每增加 1px 宽度增加 0.08 个字符
+  const maxMessageLength = Math.floor(20 + (sidebarWidth - 230) * 0.07)
+
   return (
     <div className="flex flex-col h-full">
       {/* 标题 */}
@@ -72,8 +78,8 @@ export function ConversationList({
                   </p>
                   {conv.last_message && (
                     <p className="text-sm text-text-muted truncate mt-0.5" title={conv.last_message}>
-                      {conv.last_message.length > 40
-                        ? `${conv.last_message.slice(0, 40)}...`
+                      {conv.last_message.length > maxMessageLength
+                        ? `${conv.last_message.slice(0, maxMessageLength)}...`
                         : conv.last_message}
                     </p>
                   )}
