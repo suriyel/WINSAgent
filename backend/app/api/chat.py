@@ -1,16 +1,22 @@
 """
-聊天 API 路由
+聊天 API 路由 (v2)
+
+基于 LangGraph create_react_agent 的新架构:
+- 使用 astream_events 进行流式输出
+- 使用原生 interrupt() 处理 HITL
+- 使用 Command(resume=) 恢复中断
 """
 
+import json
 import uuid
-from typing import AsyncGenerator
+from datetime import datetime
+from typing import AsyncGenerator, Any
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import Command
-import json
-import httpx
 
+from app.agents import get_agent, get_agent_state
 from app.models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -18,26 +24,26 @@ from app.models.schemas import (
     TodoStep,
     TaskStatus,
     PendingConfig,
+    ResumeRequest,
 )
-from app.agents import get_agent_graph, AgentState
-from app.agents.hitl import HITLAction, HITLMessageEncoder
-from app.tools import get_default_tools
 from app.api.conversations import _conversations_store, ConversationInfo
-from datetime import datetime
+
+router = APIRouter()
+
+
+# ============== 辅助函数 ==============
 
 
 def create_or_update_conversation(thread_id: str, message: str | None = None):
     """创建或更新对话记录"""
     try:
         if thread_id in _conversations_store:
-            # 更新现有对话
             conv = _conversations_store[thread_id]
             if message:
                 conv.title = message[:30]
                 conv.last_message = message[:100]
             conv.updated_at = datetime.now()
         else:
-            # 创建新对话
             _conversations_store[thread_id] = ConversationInfo(
                 thread_id=thread_id,
                 title=message[:30] if message else "新对话",
@@ -46,73 +52,35 @@ def create_or_update_conversation(thread_id: str, message: str | None = None):
                 updated_at=datetime.now(),
             )
     except Exception as e:
-        print(f"[DEBUG] Failed to create/update conversation: {e}")
+        print(f"[WARN] Failed to create/update conversation: {e}")
 
 
-def serialize_state_for_sse(state_data: dict) -> dict:
-    """
-    将 state 数据序列化为可 JSON 编码的格式
-    处理 TypedDict 和其他特殊类型
-    """
-    print(f"[SERIALIZE] Input state_data keys: {state_data.keys()}")
-    print(f"[SERIALIZE] pending_config exists: {'pending_config' in state_data}")
-    print(f"[SERIALIZE] pending_config value: {state_data.get('pending_config')}")
+def format_sse_event(event_type: str, data: dict) -> str:
+    """格式化 SSE 事件"""
+    return f"data: {json.dumps({'type': event_type, **data}, ensure_ascii=False)}\n\n"
 
-    serialized = {}
 
-    # 处理 pending_config
-    if "pending_config" in state_data and state_data["pending_config"]:
-        pc = state_data["pending_config"]
-        print(f"[SERIALIZE] Processing pending_config: {pc}")
-        print(f"[SERIALIZE] PC type: {type(pc)}")
-        print(f"[SERIALIZE] PC fields: {pc.get('fields') if hasattr(pc, 'get') else 'not dict-like'}")
-
-        def serialize_field(f):
-            """递归序列化字段（支持嵌套和数组类型）"""
-            result = {
-                "name": f.get("name"),
-                "label": f.get("label"),
-                "field_type": f.get("field_type"),
-                "required": f.get("required", False),
-                "default": f.get("default"),
-                "options": f.get("options"),
-                "placeholder": f.get("placeholder"),
-                "description": f.get("description"),
-                "children": None,
-                "item_type": None,
-            }
-            # 递归处理 children (object 类型)
-            if f.get("children"):
-                result["children"] = [serialize_field(c) for c in f["children"]]
-            # 递归处理 item_type (array 类型)
-            if f.get("item_type"):
-                result["item_type"] = serialize_field(f["item_type"])
-            return result
-
-        serialized["pending_config"] = {
-            "step_id": pc.get("step_id"),
-            "title": pc.get("title"),
-            "description": pc.get("description"),
-            "fields": [serialize_field(f) for f in pc.get("fields", [])],
-            "values": pc.get("values", {}),
-            # 新增字段
-            "interrupt_type": pc.get("interrupt_type", "authorization"),
-            "tool_name": pc.get("tool_name"),
-            "tool_args": pc.get("tool_args"),
-        }
-        print(f"[SERIALIZE] Serialized pending_config: {serialized['pending_config']}")
-    else:
-        print(f"[SERIALIZE] No pending_config to serialize")
-
-    # 处理 todo_list
-    if "todo_list" in state_data:
-        serialized["todo_list"] = state_data["todo_list"]
-        print(f"[SERIALIZE] Added todo_list with {len(state_data['todo_list'])} items")
-
-    print(f"[SERIALIZE] Final serialized keys: {serialized.keys()}")
-    return serialized
-
-router = APIRouter()
+def extract_todo_list_from_store(agent, thread_id: str) -> list[dict] | None:
+    """从 Store 中提取 todo_list"""
+    try:
+        from app.agents import get_store
+        store = get_store()
+        result = store.get(("todos",), thread_id)
+        if result and result.value:
+            todo_data = result.value
+            return [
+                {
+                    "id": step.get("id", str(i)),
+                    "description": step.get("description", ""),
+                    "status": step.get("status", "pending"),
+                    "result": step.get("result"),
+                    "error": step.get("error"),
+                }
+                for i, step in enumerate(todo_data.get("steps", []))
+            ]
+    except Exception as e:
+        print(f"[WARN] Failed to extract todo_list: {e}")
+    return None
 
 
 def state_to_response(state: dict, thread_id: str) -> ChatResponse:
@@ -120,85 +88,61 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
     messages = state.get("messages", [])
     last_message = messages[-1] if messages else None
 
-    # 转换 todo_list
+    # 获取 todo_list
     todo_list = []
-    for step in state.get("todo_list", []):
-        todo_list.append(
-            TodoStep(
-                id=step["id"],
-                description=step["description"],
-                tool_name=step.get("tool_name"),
-                status=step["status"],
-                result=step.get("result"),
-                error=step.get("error"),
-                depends_on=step.get("depends_on", []),
-                progress=step.get("progress", 0),
+    # 先尝试从 store 获取
+    from app.agents import get_agent
+    agent = get_agent()
+    store_todos = extract_todo_list_from_store(agent, thread_id)
+    if store_todos:
+        for step in store_todos:
+            todo_list.append(
+                TodoStep(
+                    id=step.get("id", ""),
+                    description=step.get("description", ""),
+                    tool_name=step.get("tool_name"),
+                    status=step.get("status", "pending"),
+                    result=step.get("result"),
+                    error=step.get("error"),
+                    depends_on=[],
+                    progress=100 if step.get("status") == "completed" else 0,
+                )
             )
-        )
 
-    # 转换 pending_config
-    pending_config = None
-    if state.get("pending_config"):
-        pc = state["pending_config"]
-        pending_config = PendingConfig(
-            step_id=pc["step_id"],
-            title=pc["title"],
-            description=pc.get("description"),
-            fields=pc.get("fields", []),
-            values=pc.get("values", {}),
-            interrupt_type=pc.get("interrupt_type", "authorization"),
-            tool_name=pc.get("tool_name"),
-            tool_args=pc.get("tool_args"),
-        )
-
-    # 转换完整消息历史（用于加载历史会话）
+    # 转换消息历史
     chat_messages = []
     for msg in messages:
-        # 跳过没有实际内容的系统消息
-        if msg.type == "system" and not msg.content:
+        if hasattr(msg, "type"):
+            msg_type = msg.type
+        else:
+            msg_type = getattr(msg, "role", "assistant")
+
+        # 跳过工具消息和空消息
+        if msg_type == "tool":
             continue
-        # 跳过 ToolMessage（工具调用结果在消息中以其他方式展示）
-        if hasattr(msg, "tool_name") and msg.tool_name:
-            continue
-        # 跳过标记为 internal 的消息（通过 metadata 标记）
-        if hasattr(msg, "metadata") and msg.metadata.get("internal"):
-            continue
-        # 跳过空消息
-        content = msg.content if msg.content else ""
+        content = getattr(msg, "content", "") or ""
         if not content or content.isspace():
             continue
 
-        role_map = {
-            "human": "user",
-            "ai": "assistant",
-            "system": "system",
-        }
-        role = role_map.get(msg.type, "assistant")
+        role_map = {"human": "user", "ai": "assistant", "system": "system"}
+        role = role_map.get(msg_type, "assistant")
 
         chat_messages.append(
             ChatMessage(
                 role=role,
                 content=content,
-                timestamp=datetime.now(),  # 使用当前时间，因为 LangChain 消息可能没有 timestamp
+                timestamp=datetime.now(),
             )
         )
 
-    # 构建响应消息
+    # 响应消息
+    response_content = ""
+    if last_message:
+        response_content = getattr(last_message, "content", "") or "处理完成"
+
     response_message = ChatMessage(
         role="assistant",
-        content=last_message.content if last_message else "正在处理...",
-    )
-
-    # 映射状态
-    status_map = {
-        "pending": TaskStatus.PENDING,
-        "running": TaskStatus.RUNNING,
-        "success": TaskStatus.SUCCESS,
-        "failed": TaskStatus.FAILED,
-        "waiting_input": TaskStatus.WAITING_INPUT,
-    }
-    task_status = status_map.get(
-        state.get("final_status", "pending"), TaskStatus.PENDING
+        content=response_content,
     )
 
     return ChatResponse(
@@ -206,163 +150,303 @@ def state_to_response(state: dict, thread_id: str) -> ChatResponse:
         message=response_message,
         messages=chat_messages,
         todo_list=todo_list,
-        pending_config=pending_config,
-        task_status=task_status,
+        pending_config=None,
+        task_status=TaskStatus.SUCCESS,
     )
 
 
-@router.post("/send", response_model=ChatResponse)
-async def send_message(request: ChatRequest):
-    """发送聊天消息"""
-    # 获取或创建 thread_id
-    thread_id = request.thread_id or str(uuid.uuid4())
-
-    # 创建或更新对话记录
-    create_or_update_conversation(thread_id, request.message)
-
-    # 获取 Agent Graph
-    tools = get_default_tools()
-    graph = get_agent_graph(tools)
-
-    config = {"configurable": {"thread_id": thread_id}}
-
-    # 检查是否是配置响应
-    if request.config_response:
-        # 恢复被中断的执行
-        result = graph.invoke(
-            Command(resume=request.config_response),
-            config=config,
-        )
-    else:
-        # 新消息
-        result = graph.invoke(
-            {"messages": [HumanMessage(content=request.message)]},
-            config=config,
-        )
-
-    return state_to_response(result, thread_id)
+# ============== API 端点 ==============
 
 
 @router.post("/stream")
 async def stream_message(request: ChatRequest):
-    """流式发送聊天消息"""
-    thread_id = request.thread_id or str(uuid.uuid4())
+    """
+    流式发送聊天消息
 
-    # 创建或更新对话记录
+    使用 LangGraph astream_events 进行流式输出，支持:
+    - 实时 token 输出
+    - 工具调用状态
+    - HITL 中断
+    """
+    thread_id = request.thread_id or str(uuid.uuid4())
     create_or_update_conversation(thread_id, request.message)
 
-    tools = get_default_tools()
-    graph = get_agent_graph(tools)
-
-    config = {"configurable": {"thread_id": thread_id}}
+    agent = get_agent()
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": "default",
+        }
+    }
 
     async def generate() -> AsyncGenerator[str, None]:
         """生成 SSE 事件流"""
         try:
-            if request.config_response:
-                stream = graph.stream(
-                    Command(resume=request.config_response),
-                    config=config,
-                    stream_mode="updates",
-                )
-            else:
-                stream = graph.stream(
-                    {"messages": [HumanMessage(content=request.message)]},
-                    config=config,
-                    stream_mode="updates",
-                )
+            accumulated_content = ""
+            current_tool = None
+            has_interrupt = False
 
-            needs_user_input = False
-            last_state_data = {}
+            # 使用 astream_events 进行流式处理
+            async for event in agent.astream_events(
+                {"messages": [{"role": "user", "content": request.message}]},
+                config=config,
+                version="v2",
+            ):
+                event_kind = event.get("event", "")
 
-            for update in stream:
-                # 发送更新事件
-                event_data = {
-                    "type": "update",
+                # 处理 LLM 流式输出
+                if event_kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        accumulated_content += chunk.content
+                        yield format_sse_event("update", {
+                            "thread_id": thread_id,
+                            "data": {
+                                "content": chunk.content,
+                                "accumulated": accumulated_content,
+                            }
+                        })
+
+                # 处理工具调用开始
+                elif event_kind == "on_tool_start":
+                    tool_name = event.get("name", "unknown")
+                    tool_input = event.get("data", {}).get("input", {})
+                    current_tool = tool_name
+                    yield format_sse_event("update", {
+                        "thread_id": thread_id,
+                        "data": {
+                            "node": "tool",
+                            "tool_name": tool_name,
+                            "tool_input": tool_input,
+                            "status": "running",
+                        }
+                    })
+
+                # 处理工具调用结束
+                elif event_kind == "on_tool_end":
+                    tool_name = event.get("name", current_tool or "unknown")
+                    tool_output = event.get("data", {}).get("output", "")
+                    yield format_sse_event("update", {
+                        "thread_id": thread_id,
+                        "data": {
+                            "node": "tool",
+                            "tool_name": tool_name,
+                            "tool_output": str(tool_output)[:500],
+                            "status": "completed",
+                        }
+                    })
+                    current_tool = None
+
+            # 检查是否有中断 (HITL)
+            state = agent.get_state(config)
+            if state and state.tasks:
+                # 有待处理的中断
+                for task in state.tasks:
+                    if hasattr(task, "interrupts") and task.interrupts:
+                        interrupt_data = task.interrupts[0].value
+                        has_interrupt = True
+
+                        # 构建 pending_config
+                        pending_config = {
+                            "step_id": interrupt_data.get("tool_name", "unknown"),
+                            "title": interrupt_data.get("action", "需要确认"),
+                            "description": interrupt_data.get("reason", ""),
+                            "interrupt_type": interrupt_data.get("type", "authorization"),
+                            "tool_name": interrupt_data.get("tool_name"),
+                            "tool_args": interrupt_data.get("params", {}),
+                            "fields": [],
+                            "values": interrupt_data.get("params", {}),
+                        }
+
+                        # 根据中断类型添加字段
+                        if interrupt_data.get("type") == "input_required":
+                            pending_config["fields"] = [{
+                                "name": "input",
+                                "label": interrupt_data.get("question", "请输入"),
+                                "field_type": "text",
+                                "required": True,
+                            }]
+                        elif interrupt_data.get("choices"):
+                            pending_config["fields"] = [{
+                                "name": "choice",
+                                "label": interrupt_data.get("question", "请选择"),
+                                "field_type": "select",
+                                "required": True,
+                                "options": interrupt_data.get("choices", []),
+                            }]
+
+                        yield format_sse_event("interrupt", {
+                            "thread_id": thread_id,
+                            "data": {
+                                "pending_config": pending_config,
+                            }
+                        })
+                        break
+
+            if not has_interrupt:
+                # 正常完成
+                # 获取 todo_list
+                todo_list = extract_todo_list_from_store(agent, thread_id)
+
+                done_data: dict[str, Any] = {
                     "thread_id": thread_id,
-                    "data": {},
+                    "data": {"status": "completed"},
                 }
+                if todo_list:
+                    done_data["data"]["todo_list"] = todo_list
 
-                # 提取节点更新
-                for node_name, node_state in update.items():
-                    event_data["data"]["node"] = node_name
+                yield format_sse_event("done", done_data)
 
-                    # 保存最新的 state 数据
-                    last_state_data = node_state
-
-                    if "messages" in node_state:
-                        msgs = node_state["messages"]
-                        if msgs:
-                            last_msg = msgs[-1]
-                            event_data["data"]["content"] = last_msg.content
-
-                    if "todo_list" in node_state:
-                        event_data["data"]["todo_list"] = node_state["todo_list"]
-
-                    if "final_status" in node_state:
-                        event_data["data"]["status"] = node_state["final_status"]
-                        # 检测是否需要用户输入
-                        if node_state["final_status"] == "waiting_input":
-                            needs_user_input = True
-                            print(f"[DEBUG] Detected waiting_input status in node: {node_name}")
-
-                    if "pending_config" in node_state and node_state["pending_config"]:
-                        print(f"[DEBUG] Found pending_config in node {node_name}: {node_state['pending_config']}")
-                        # 序列化 pending_config
-                        serialized = serialize_state_for_sse({"pending_config": node_state["pending_config"]})
-                        if "pending_config" in serialized:
-                            event_data["data"]["pending_config"] = serialized["pending_config"]
-                            print(f"[DEBUG] Serialized and added to event: {serialized['pending_config']}")
-
-                yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-
-            # 如果需要用户输入，发送 interrupt 事件
-            if needs_user_input:
-                print(f"[DEBUG] Stream ended with waiting_input status, sending interrupt event")
-                print(f"[DEBUG] Last state data keys: {last_state_data.keys()}")
-
-                # 序列化最终状态
-                serialized_data = serialize_state_for_sse(last_state_data)
-                print(f"[DEBUG] Final serialized data: {serialized_data}")
-
-                interrupt_event = {
-                    "type": "interrupt",
-                    "thread_id": thread_id,
-                    "data": serialized_data,
-                }
-                print(f"[DEBUG] Sending interrupt event: {interrupt_event}")
-                yield f"data: {json.dumps(interrupt_event, ensure_ascii=False)}\n\n"
-            else:
-                # 正常完成，发送完成事件
-                print(f"[DEBUG] Stream completed normally, sending done event")
-                # 包含最终状态信息
-                done_event = {
-                    "type": "done",
-                    "thread_id": thread_id,
-                }
-                if last_state_data.get("final_status"):
-                    done_event["data"] = {"status": last_state_data["final_status"]}
-                if last_state_data.get("todo_list"):
-                    if "data" not in done_event:
-                        done_event["data"] = {}
-                    done_event["data"]["todo_list"] = last_state_data["todo_list"]
-                yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
-
-                # 更新对话的最后消息
-                if last_state_data.get("messages"):
-                    messages = last_state_data["messages"]
-                    if messages:
-                        last_msg = messages[-1]
-                        if last_msg.content:
-                            create_or_update_conversation(thread_id, last_msg.content)
+                # 更新对话
+                if accumulated_content:
+                    create_or_update_conversation(thread_id, accumulated_content)
 
         except Exception as e:
-            error_event = {
-                "type": "error",
+            import traceback
+            traceback.print_exc()
+            yield format_sse_event("error", {
                 "thread_id": thread_id,
                 "error": str(e),
-            }
-            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+            })
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/resume/{thread_id}")
+async def resume_chat(thread_id: str, request: ResumeRequest):
+    """
+    恢复被中断的会话
+
+    使用 LangGraph Command(resume=) 恢复执行。
+
+    支持的 action:
+    - approve: 批准执行
+    - reject: 拒绝执行
+    - edit: 修改参数后执行
+    - confirm: 确认输入
+    - cancel: 取消操作
+    """
+    agent = get_agent()
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # 解析 action
+    action = request.action or request.dict().get("_action")
+    if not action:
+        raise HTTPException(status_code=400, detail="Missing action field")
+
+    # 构建恢复数据
+    resume_data: dict[str, Any] = {"action": action}
+
+    # 处理不同的 action
+    if action in ("reject", "cancel"):
+        resume_data["reason"] = request.reason or "用户取消"
+
+    elif action == "edit":
+        # 使用修改后的参数
+        resume_data["params"] = request.values or {}
+
+    elif action == "confirm":
+        # 用户输入
+        resume_data["input"] = request.values.get("input", "") if request.values else ""
+
+    elif action == "approve":
+        # 批准，无需额外数据
+        pass
+
+    async def generate() -> AsyncGenerator[str, None]:
+        """生成 SSE 事件流"""
+        try:
+            accumulated_content = ""
+            has_interrupt = False
+
+            # 使用 Command(resume=) 恢复执行
+            async for event in agent.astream_events(
+                Command(resume=resume_data),
+                config=config,
+                version="v2",
+            ):
+                event_kind = event.get("event", "")
+
+                if event_kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        accumulated_content += chunk.content
+                        yield format_sse_event("update", {
+                            "thread_id": thread_id,
+                            "data": {"content": chunk.content}
+                        })
+
+                elif event_kind == "on_tool_start":
+                    yield format_sse_event("update", {
+                        "thread_id": thread_id,
+                        "data": {
+                            "node": "tool",
+                            "tool_name": event.get("name"),
+                            "status": "running",
+                        }
+                    })
+
+                elif event_kind == "on_tool_end":
+                    yield format_sse_event("update", {
+                        "thread_id": thread_id,
+                        "data": {
+                            "node": "tool",
+                            "tool_name": event.get("name"),
+                            "status": "completed",
+                        }
+                    })
+
+            # 检查是否还有中断
+            state = agent.get_state(config)
+            if state and state.tasks:
+                for task in state.tasks:
+                    if hasattr(task, "interrupts") and task.interrupts:
+                        interrupt_data = task.interrupts[0].value
+                        has_interrupt = True
+                        yield format_sse_event("interrupt", {
+                            "thread_id": thread_id,
+                            "data": {
+                                "pending_config": {
+                                    "step_id": interrupt_data.get("tool_name", "unknown"),
+                                    "title": interrupt_data.get("action", "需要确认"),
+                                    "interrupt_type": interrupt_data.get("type", "authorization"),
+                                    "tool_name": interrupt_data.get("tool_name"),
+                                    "tool_args": interrupt_data.get("params", {}),
+                                    "fields": [],
+                                    "values": {},
+                                }
+                            }
+                        })
+                        break
+
+            if not has_interrupt:
+                todo_list = extract_todo_list_from_store(agent, thread_id)
+                done_data: dict[str, Any] = {
+                    "thread_id": thread_id,
+                    "data": {"status": "completed"},
+                }
+                if todo_list:
+                    done_data["data"]["todo_list"] = todo_list
+                yield format_sse_event("done", done_data)
+
+                if accumulated_content:
+                    create_or_update_conversation(thread_id, accumulated_content)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield format_sse_event("error", {
+                "thread_id": thread_id,
+                "error": str(e),
+            })
 
     return StreamingResponse(
         generate(),
@@ -376,143 +460,48 @@ async def stream_message(request: ChatRequest):
 
 
 @router.get("/state/{thread_id}")
-async def get_chat_state(thread_id: str):
+async def get_chat_state_endpoint(thread_id: str):
     """获取会话状态"""
-    graph = get_agent_graph()
+    agent = get_agent()
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
-        state = graph.get_state(config)
+        state = agent.get_state(config)
         if state and state.values:
             return state_to_response(state.values, thread_id)
         raise HTTPException(status_code=404, detail="会话不存在")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/resume/{thread_id}")
-async def resume_chat(thread_id: str, config_values: dict):
-    """恢复被中断的会话
+# ============== 向后兼容端点 ==============
 
-    支持两种中断场景:
-    1. param_required (参数补充): 用户补充缺失参数
-       - confirm: 确认补充的参数
-       - cancel: 取消操作
 
-    2. authorization (授权): 工具执行前授权
-       - approve: 批准执行（使用原参数）
-       - edit: 编辑后执行（使用修改后的参数）
-       - reject: 拒绝执行
+@router.post("/send", response_model=ChatResponse)
+async def send_message(request: ChatRequest):
     """
-    print(f"[RESUME] Thread: {thread_id}, Config values: {config_values}")
+    [Deprecated] 同步发送消息
 
-    tools = get_default_tools()
-    graph = get_agent_graph(tools)
-    config = {"configurable": {"thread_id": thread_id}}
+    推荐使用 /stream 端点
+    """
+    thread_id = request.thread_id or str(uuid.uuid4())
+    create_or_update_conversation(thread_id, request.message)
+
+    agent = get_agent()
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": "default",
+        }
+    }
 
     try:
-        # 获取当前状态
-        current_state = graph.get_state(config)
-        pending_config = current_state.values.get("pending_config")
-        interrupt_type = pending_config.get("interrupt_type") if pending_config else None
-
-        print(f"[RESUME] Interrupt type: {interrupt_type}")
-        print(f"[RESUME] Pending config: {pending_config}")
-
-        # 解析 action - 支持 _action (旧) 和 action (新) 字段
-        action_str = config_values.get("_action") or config_values.get("action")
-        step_id = pending_config.get("step_id") if pending_config else None
-
-        # 将 action 字符串转换为 HITLAction 枚举
-        try:
-            action = HITLAction(action_str) if action_str else None
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid action: {action_str}")
-
-        if not action:
-            raise HTTPException(status_code=400, detail="Missing action field")
-
-        # 处理拒绝/取消操作
-        if action in (HITLAction.REJECT, HITLAction.CANCEL):
-            print(f"[RESUME] User {action.value} the operation")
-
-            todo_list = list(current_state.values.get("todo_list", []))
-            if step_id:
-                for step in todo_list:
-                    if step.get("id") == step_id:
-                        step["status"] = "failed"
-                        step["error"] = "用户取消" if action == HITLAction.CANCEL else "用户拒绝"
-                        break
-
-            reject_msg = AIMessage(content="已取消此操作。", metadata={"internal": True})
-
-            # 使用 HITLMessageEncoder 创建取消消息（用于状态记录）
-            hitl_msg = HITLMessageEncoder.encode(
-                action=action,
-                values={},
-                pending_config=pending_config,
-            )
-
-            updates = {
-                "pending_config": None,
-                "final_status": "failed",
-                "todo_list": todo_list,
-                "messages": [hitl_msg, reject_msg],
-                "error_info": "用户取消" if action == HITLAction.CANCEL else "用户拒绝",
-            }
-
-            graph.update_state(config, updates)
-            updated_state = graph.get_state(config)
-            return state_to_response(updated_state.values, thread_id)
-
-        # 处理确认/批准/编辑操作
-        clean_values = {k: v for k, v in config_values.items() if not k.startswith("_") and k != "action"}
-
-        # 根据 action 类型映射到正确的 HITLAction
-        # approve -> APPROVE, edit -> EDIT, confirm -> CONFIRM
-        if action_str == "confirm":
-            action = HITLAction.CONFIRM
-        elif action_str == "approve":
-            action = HITLAction.APPROVE
-        elif action_str == "edit":
-            action = HITLAction.EDIT
-
-        # 使用 HITLMessageEncoder 创建消息
-        user_input_msg = HITLMessageEncoder.encode(
-            action=action,
-            values=clean_values,
-            pending_config=pending_config,
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": request.message}]},
+            config=config,
         )
-
-        updates = {
-            "pending_config": None,
-            "final_status": "running",
-            "messages": [user_input_msg],
-        }
-
-        print(f"[RESUME] Updating state with HITL message: action={action.value}")
-        graph.update_state(config, updates)
-
-        # 继续执行
-        print(f"[RESUME] Invoking graph to continue execution...")
-        result = graph.invoke(None, config=config)
-
-        print(f"[RESUME] Execution completed, final status: {result.get('final_status')}")
-
-        # 更新对话的最后消息
-        if result.get("messages"):
-            messages = result["messages"]
-            if messages:
-                last_msg = messages[-1]
-                if last_msg.content:
-                    create_or_update_conversation(thread_id, last_msg.content)
-
         return state_to_response(result, thread_id)
-
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"[RESUME] Error: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

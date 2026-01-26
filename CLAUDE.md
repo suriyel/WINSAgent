@@ -19,7 +19,8 @@ WINS Agent is an AI task orchestration platform built on **LangGraph 1.0** and *
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate  # Windows: source venv/bin/activate on Linux/macOS
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 python run.py  # http://localhost:8000 (uses config from .env)
 # Alternative: python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -52,19 +53,20 @@ User Input → [Supervisor] → routes to:
   ├→ [Executor] - Tool invocation (interrupt_before for HITL)
   │     ├→ (success) → Goal Evaluator → skip remaining if goal achieved
   │     └→ (failure after max retries) → Create ReplanContext
-  ├→ [Replanner] - Generate revised plan on failure (NEW)
+  ├→ [Replanner] - Generate revised plan on failure
   └→ [Validator] - Result validation, error attribution
 ```
 
 ### Key Backend Modules (`backend/app/`)
 - **`agents/state.py`** - AgentState TypedDict (messages, todo_list, pending_config, replan_context, goal_achieved)
 - **`agents/graph.py`** - StateGraph assembly with interrupt handling
+- **`agents/llm.py`** - LLM initialization (Qwen3 via DashScope OpenAI-compatible endpoint)
 - **`agents/hitl.py`** - HITL protocol: HITLAction enum, encoder/decoder, config builders
 - **`agents/supervisor.py`** - Routing & coordination (planner/executor/replanner/validator)
 - **`agents/planner.py`** - Task decomposition
 - **`agents/executor.py`** - Tool execution with HITL interrupts, replan triggers, goal evaluation
-- **`agents/replanner.py`** - Dynamic replanning on failure (NEW)
-- **`agents/goal_evaluator.py`** - Early goal completion detection (NEW)
+- **`agents/replanner.py`** - Dynamic replanning on failure
+- **`agents/goal_evaluator.py`** - Early goal completion detection
 - **`agents/context_manager.py`** - Token budget, message compression, tool metadata trimming
 - **`tools/base.py`** - ToolRegistry and @tool decorators
 - **`knowledge/retriever.py`** - RAG with FAISS + DashScope (model: text-embedding-v3)
@@ -130,12 +132,7 @@ The `ToolRegistry` class manages tool registration:
 
 ### Dynamic Replanning (`agents/replanner.py`, `agents/goal_evaluator.py`)
 
-Intelligent task recovery and early completion detection:
-
-**Components:**
-- `ReplanContext`: Captures failure context (trigger_reason, failed_step, completed_results)
-- `replanner_node`: LLM-powered plan revision with 4 strategies
-- `goal_evaluator`: Detects early goal completion to skip unnecessary steps
+Intelligent task recovery and early completion detection.
 
 **Replan Strategies:**
 | Strategy | When Used | Action |
@@ -145,24 +142,7 @@ Intelligent task recovery and early completion detection:
 | `skip_failed` | Step not critical | Mark as skipped, continue |
 | `abort` | Unrecoverable | Go to validator with failure |
 
-**Flow:**
-1. Step fails after max retries → Executor creates `ReplanContext`
-2. Supervisor routes to Replanner node
-3. Replanner generates revised plan using LLM
-4. Merged plan resumes execution from Supervisor
-
-**Goal Evaluation (on-demand):**
-1. Step completes successfully with success indicators ("完成", "成功", etc.)
-2. `should_evaluate_goal()` heuristic triggers evaluation
-3. LLM evaluates if original intent is satisfied
-4. If goal achieved → remaining steps marked as "skipped" → Validator
-
-**TodoStep Status Values:**
-- `pending` - Not yet started
-- `running` - Currently executing
-- `completed` - Successfully finished
-- `failed` - Failed after retries
-- `skipped` - Skipped (goal achieved early or replanning)
+**TodoStep Status Values:** `pending`, `running`, `completed`, `failed`, `skipped`
 
 ## API Endpoints (v1)
 

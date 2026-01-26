@@ -95,6 +95,14 @@ class ChatRequest(BaseModel):
     config_response: dict[str, Any] | None = Field(None, description="用户配置响应")
 
 
+class ResumeRequest(BaseModel):
+    """恢复中断请求"""
+
+    action: str | None = Field(None, description="操作类型: approve, reject, edit, confirm, cancel")
+    values: dict[str, Any] | None = Field(None, description="用户输入的值")
+    reason: str | None = Field(None, description="拒绝/取消原因")
+
+
 class ChatResponse(BaseModel):
     """聊天响应"""
 

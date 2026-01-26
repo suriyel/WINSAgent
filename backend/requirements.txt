@@ -1,37 +1,41 @@
 # ===================================
-# Requirements.txt - Updated: 2026-01-20
+# Requirements.txt - WINS Agent v2
+# Updated: 2026-01-27
 # ===================================
 
 # ---------------------------------
 # LangChain / LangGraph Core
 # ---------------------------------
-langchain>=1.2.6,<2.0.0
+langchain>=0.3.0,<1.0.0
+langchain-core>=0.3.0,<1.0.0
 langchain-community>=0.3.0,<1.0.0
-langgraph>=1.0.6,<2.0.0
+langgraph>=0.2.0,<1.0.0
 
 # LLM Integrations
-langchain-openai>=1.1.0,<2.0.0
+langchain-openai>=0.2.0,<1.0.0
 
 # Checkpoint Savers (Persistence)
 # 开发环境使用内存存储 (InMemorySaver)
-# 生产环境可配置 Redis（需 Python < 3.14）
-langgraph-checkpoint-redis>=0.3.0,<1.0.0
+# 生产环境可配置 Redis
+langgraph-checkpoint>=0.2.0,<1.0.0
+
+# Short-term Memory (Context Management)
+# langmem>=0.0.14  # Optional: for SummarizationNode
 
 # ---------------------------------
 # Vector Store
 # ---------------------------------
-faiss-cpu>=1.13.0,<2.0.0
+faiss-cpu>=1.9.0,<2.0.0
 
 # ---------------------------------
 # Web Framework
 # ---------------------------------
-fastapi[standard]>=0.128.0,<0.129.0
+fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.30.0,<1.0.0
 
 # ---------------------------------
 # Data Validation
 # ---------------------------------
-# NOTE: LangChain 1.x requires Pydantic 2.7+
 pydantic>=2.10.0,<3.0.0
 pydantic-settings>=2.2.0,<3.0.0
 
@@ -60,3 +64,8 @@ tiktoken>=0.5.0,<1.0.0
 # Qwen API (OpenAI compatible)
 # ---------------------------------
 dashscope>=1.20.0,<2.0.0
+
+# ---------------------------------
+# Optional: YAML support for tools
+# ---------------------------------
+pyyaml>=6.0.0,<7.0.0
