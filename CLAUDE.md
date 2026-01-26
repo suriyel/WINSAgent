@@ -240,12 +240,27 @@ SubAgents are implemented via `agent.as_tool()` pattern:
 
 **SSE Event Types (v2):**
 - `update` - Streaming updates from `astream_events`:
-  - `on_chat_model_stream` → content chunks
-  - `on_tool_start` → tool invocation start
-  - `on_tool_end` → tool completion
+  - `on_chat_model_stream` → content chunks (sent to frontend)
+  - `on_tool_start` → tool invocation start (sent to frontend)
+  - `on_tool_end` → tool completion (sent to frontend)
 - `interrupt` - HITL interrupt (detected via `state.tasks`)
 - `done` - Completion with final status and todo_list from Store
 - `error` - Error events
+
+**LangGraph `astream_events` Types:**
+
+LangGraph emits various event types. Current implementation:
+
+**Processed** (sent to frontend):
+- `on_chat_model_stream` - LLM streaming tokens
+- `on_tool_start` - Tool execution begins
+- `on_tool_end` - Tool execution completes
+
+**Ignored** (silently filtered):
+- `on_chain_start`, `on_chain_end`, `on_chain_stream` - Graph lifecycle
+- `on_chat_model_start`, `on_chat_model_end` - LLM lifecycle
+
+Debug: Uncomment `print(f"[DEBUG] Event: {event_kind}...")` in [chat.py](backend/app/api/chat.py:196)
 
 ## Environment Configuration
 
