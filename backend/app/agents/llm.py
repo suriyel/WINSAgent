@@ -34,8 +34,8 @@ def get_llm(
 
     # DashScope 兼容 OpenAI 接口
     llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.dashscope_api_key,
+        model="qwen-plus-2025-12-01",
+        api_key="sk-08f5d6a4a05043d5aaee7b64c282a864",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=temperature,
         max_tokens=max_tokens,
@@ -50,8 +50,8 @@ def get_summarization_model() -> BaseChatModel:
 
     # 摘要使用较小的 token 限制
     return ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.dashscope_api_key,
+        model="qwen-plus-2025-12-01",
+        api_key="sk-08f5d6a4a05043d5aaee7b64c282a864",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=0.3,
         max_tokens=512,
@@ -82,8 +82,8 @@ def get_llm_for_subagent(
     config = configs.get(purpose, configs["planner"])
 
     return ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.dashscope_api_key,
+        model="qwen-plus-2025-12-01",
+        api_key="sk-08f5d6a4a05043d5aaee7b64c282a864",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         **config,
     )

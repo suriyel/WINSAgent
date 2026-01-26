@@ -10,7 +10,7 @@ from typing import Any
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
-from langgraph.graph.state import CompiledGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.base import BaseStore
@@ -83,7 +83,7 @@ def create_main_agent(
     store: BaseStore | None = None,
     include_subagents: bool = True,
     context_config: ContextConfig | None = None,
-) -> CompiledGraph:
+) -> CompiledStateGraph:
     """
     创建主 Agent
 
@@ -148,7 +148,7 @@ def create_main_agent(
 # ============== 全局实例管理 ==============
 
 
-_agent_instance: CompiledGraph | None = None
+_agent_instance: CompiledStateGraph | None = None
 _checkpointer_instance: BaseCheckpointSaver | None = None
 _store_instance: BaseStore | None = None
 
@@ -187,7 +187,7 @@ def get_store() -> BaseStore:
     return _store_instance
 
 
-def get_agent() -> CompiledGraph:
+def get_agent() -> CompiledStateGraph:
     """
     获取 Agent 单例
 
