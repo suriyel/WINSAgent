@@ -249,29 +249,73 @@ SubAgents are implemented via `agent.as_tool()` pattern:
 
 ## Environment Configuration
 
-Required in `backend/.env` (copy from `.env.example`):
+### Setup
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cd backend
+   cp .env.example .env
+   ```
+
+2. Edit `.env` with your settings (use uppercase with underscores)
+
+### Settings Implementation (`backend/app/config.py`)
+
+Uses `pydantic-settings` with Pydantic v2:
+- Auto-reads from `.env` file via `SettingsConfigDict`
+- Automatically converts env vars to lowercase snake_case Python attributes
+- Provides defaults if env vars not set
+- Type validation via Pydantic
+
+### Configuration Variables
 
 **LLM:**
-- `DASHSCOPE_API_KEY` - For LLM and embeddings
-- `LLM_MODEL` - Model name (default: qwen3-72b-instruct)
+- `DASHSCOPE_API_KEY` - API key for Qwen models (required)
+- `LLM_MODEL` - Model name (default: `qwen3-72b-instruct`)
 
 **Database:**
-- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` - Task persistence
+- `MYSQL_HOST` - Database host (default: `localhost`)
+- `MYSQL_PORT` - Database port (default: `3306`)
+- `MYSQL_USER` - Username (default: `root`)
+- `MYSQL_PASSWORD` - Password (default: `""`)
+- `MYSQL_DATABASE` - Database name (default: `wins_agent`)
 
 **Redis:**
-- `REDIS_URL` - For production checkpointing
+- `REDIS_URL` - Redis connection string (default: `redis://localhost:6379`)
 
 **Vector Store:**
-- `FAISS_INDEX_PATH` - Path to FAISS index (default: ./data/faiss_index)
+- `FAISS_INDEX_PATH` - FAISS index path (default: `./data/faiss_index`)
 
 **Server:**
-- `API_HOST` - Server host (default: 0.0.0.0)
-- `API_PORT` - Server port (default: 8000)
-- `DEBUG` - Debug mode flag
+- `API_HOST` - Server host (default: `0.0.0.0`)
+- `API_PORT` - Server port (default: `8000`, type: `int`)
+- `DEBUG` - Debug mode (default: `true`, type: `bool`)
 
-Dev uses InMemorySaver (state lost on restart). Production requires Redis.
+**Agent:**
+- `MESSAGE_TOKEN_LIMIT` - Context token budget (default: `4000`, type: `int`)
+- `RECURSION_LIMIT` - LangGraph recursion limit (default: `50`, type: `int`)
 
-**API Docs:** http://localhost:8000/docs (Swagger UI)
+### Adding New Configuration
+
+In `config.py`, add to `Settings` class:
+```python
+class Settings(BaseSettings):
+    your_setting: str = "default_value"  # Auto-read from ENV_VAR
+    your_int: int = 100  # Type is validated
+```
+
+Then access via:
+```python
+from app.config import get_settings
+settings = get_settings()
+value = settings.your_setting
+```
+
+### Environment Notes
+
+- Dev uses `InMemorySaver` (state lost on restart)
+- Production requires Redis for persistent checkpointing
+- **API Docs:** http://localhost:8000/docs (Swagger UI)
 
 **Note:** No test suite currently exists. When adding tests, create `backend/tests/` and `frontend/src/**/*.test.tsx`.
 
