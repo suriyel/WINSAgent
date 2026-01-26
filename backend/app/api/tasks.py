@@ -12,7 +12,7 @@ from app.models.schemas import (
     TodoStep,
     TodoStatus,
 )
-from app.agents import get_agent_graph
+from app.agents import get_agent
 
 router = APIRouter()
 
@@ -96,7 +96,7 @@ async def get_task_steps(task_id: str):
 
 def sync_task_from_thread(thread_id: str) -> TaskInfo | None:
     """从会话状态同步任务信息"""
-    graph = get_agent_graph()
+    graph = get_agent()
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
