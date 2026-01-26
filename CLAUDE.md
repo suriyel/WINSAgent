@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WINS Agent is an AI task orchestration platform built on **LangGraph 1.0** and **FastAPI**. It features multi-agent collaboration, human-in-the-loop capabilities, and real-time task visualization using SSE streaming.
+WINS Agent is an AI task orchestration platform built on **LangGraph 1.0** and **FastAPI**. It features ReAct-based agent orchestration, human-in-the-loop capabilities, and real-time task visualization using SSE streaming.
 
 **Tech Stack:**
 - **Frontend:** React 18, Vite, TailwindCSS, Zustand (state), TanStack Query
-- **Backend:** FastAPI, LangGraph 1.0.6, LangChain 1.2.6
-- **LLM:** Qwen3-72B-Instruct (via DashScope API)
+- **Backend:** FastAPI, LangGraph 1.0.6 (`create_react_agent`), LangChain 1.2.6
+- **LLM:** Qwen3-72B-Instruct (via DashScope OpenAI-compatible API)
 - **Vector Store:** FAISS with DashScope Embeddings
-- **Persistence:** Redis (checkpointer), MySQL, InMemorySaver (dev)
+- **Persistence:** Redis (checkpointer, prod), InMemorySaver (dev), InMemoryStore (sessions)
 
 ## Commands
 
@@ -46,36 +46,78 @@ scripts\start-dev.bat   # Windows
 
 ## Architecture
 
-### Multi-Agent Workflow
+### Agent v2 Workflow (LangGraph ReAct)
+
+The system now uses LangGraph's `create_react_agent` as the single entry point, replacing the previous hand-coded multi-node graph architecture:
+
 ```
-User Input → [Supervisor] → routes to:
-  ├→ [Planner] - Intent parsing, task decomposition
-  ├→ [Executor] - Tool invocation (interrupt_before for HITL)
-  │     ├→ (success) → Goal Evaluator → skip remaining if goal achieved
-  │     └→ (failure after max retries) → Create ReplanContext
-  ├→ [Replanner] - Generate revised plan on failure
-  └→ [Validator] - Result validation, error attribution
+User Input → [Main Agent (ReAct)]
+                 │
+                 ├─ LLM reasoning
+                 ├─ Tool selection & execution
+                 ├─ interrupt() for HITL
+                 └─ Result synthesis
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │   Available Tools    │
+          ├─────────────────────┤
+          │ • write_todos        │ ─ Todo management
+          │ • read_todos         │
+          │ • update_todo_step   │
+          │ • request_human_*    │ ─ HITL (interrupt() based)
+          │ • search_knowledge   │ ─ Business tools
+          │ • create_task        │
+          │ • calculate          │
+          │ • read_file/write_* │
+          │ • http_request       │
+          │ • planner_expert     │ ─ SubAgent as tool
+          │ • validator_expert   │   (agent.as_tool())
+          │ • research_expert    │
+          └─────────────────────┘
 ```
 
+**Key architectural changes from v1:**
+- **Removed:** supervisor.py, executor.py, replanner.py, goal_evaluator.py nodes
+- **Added:** Single `main_agent.py` using `create_react_agent`
+- **HITL:** Now uses native `interrupt()` instead of custom protocol
+- **Context:** Managed via `pre_model_hook` middleware
+- **SubAgents:** Implemented via `agent.as_tool()` pattern
+
 ### Key Backend Modules (`backend/app/`)
-- **`agents/state.py`** - AgentState TypedDict (messages, todo_list, pending_config, replan_context, goal_achieved)
-- **`agents/graph.py`** - StateGraph assembly with interrupt handling
+
+**Core Agent:**
+- **`agents/main_agent.py`** - Main entry point using `create_react_agent()`. Contains:
+  - `create_main_agent()` - Agent factory with tool assembly
+  - `get_agent()` - Singleton instance
+  - `get_checkpointer()` / `get_store()` - Persistence management
+  - `invoke_agent()` / `stream_agent()` - Convenience wrappers
 - **`agents/llm.py`** - LLM initialization (Qwen3 via DashScope OpenAI-compatible endpoint)
-- **`agents/hitl.py`** - HITL protocol: HITLAction enum, encoder/decoder, config builders
-- **`agents/supervisor.py`** - Routing & coordination (planner/executor/replanner/validator)
-- **`agents/planner.py`** - Task decomposition
-- **`agents/executor.py`** - Tool execution with HITL interrupts, replan triggers, goal evaluation
-- **`agents/replanner.py`** - Dynamic replanning on failure
-- **`agents/goal_evaluator.py`** - Early goal completion detection
-- **`agents/context_manager.py`** - Token budget, message compression, tool metadata trimming
-- **`tools/base.py`** - ToolRegistry and @tool decorators
+
+**Middleware:**
+- **`agents/middleware/context.py`** - Context management via `pre_model_hook`:
+  - `create_context_middleware()` - Token budget enforcement, tool result compression
+  - `ContextConfig` - Configuration dataclass
+
+**Tools:**
+- **`agents/tools/todos.py`** - Todo management: `write_todos`, `read_todos`, `update_todo_step`
+- **`agents/tools/hitl.py`** - HITL using native `interrupt()`: `request_human_approval`, `request_human_input`
+- **`agents/tools/business.py`** - Business tools: search_knowledge, create_task, calculate, file ops, http_request, etc.
+- **`tools/base.py`** - ToolRegistry (legacy, less used in v2)
+
+**SubAgents (as Tools):**
+- **`agents/subagents/planner.py`** - Planning expert SubAgent (via `agent.as_tool()`)
+- **`agents/subagents/validator.py`** - Validation expert SubAgent
+- **`agents/subagents/research.py`** - Research expert SubAgent
+
+**Knowledge & API:**
 - **`knowledge/retriever.py`** - RAG with FAISS + DashScope (model: text-embedding-v3)
-- **`api/chat.py`** - `/chat/stream` (SSE), `/chat/resume/{thread_id}`, `/chat/state/{thread_id}`
-- **`api/conversations.py`** - Conversation CRUD with Redis state cleanup
+- **`api/chat.py`** - `/chat/stream` (SSE with `astream_events`), `/chat/resume/{thread_id}` (Command(resume=)), `/chat/state/{thread_id}`
+- **`api/conversations.py`** - Conversation CRUD
 - **`api/tasks.py`** - Task persistence
 - **`api/knowledge.py`** - Knowledge base management
 - **`api/tools.py`** - Tool listing
-- **`config.py`** - Environment settings, token limits (4000 tokens), replan config
+- **`config.py`** - Simplified settings (message_token_limit, recursion_limit, tools_require_approval)
 
 ### Key Frontend Modules (`frontend/src/`)
 - **`stores/chatStore.ts`** - Zustand store (threadId, messages, todoList, pendingConfig)
@@ -87,62 +129,75 @@ User Input → [Supervisor] → routes to:
 - **`components/HumanInput/InlineHumanInput.tsx`** - Inline HITL input (alternative to ConfigModal)
 - **`utils/cn.ts`** - `clsx` + `tailwind-merge` utility for className merging
 
-### Human-in-the-Loop Protocol (`agents/hitl.py`)
+### Human-in-the-Loop Protocol (`agents/tools/hitl.py`)
 
-Centralized HITL communication with type-safe encoding/decoding:
+HITL now uses LangGraph's native `interrupt()` mechanism:
 
-**Components:**
-- `HITLAction` enum: `approve`, `edit`, `confirm`, `reject`, `cancel`
-- `HITLMessageEncoder`: Encodes user actions to HumanMessage for graph state
-- `HITLMessageDecoder`: Decodes HumanMessage to HITLResumeData for executor
-- Config builders: `create_authorization_config()`, `create_param_required_config()`, `create_user_input_config()`
+**Tools:**
+- `request_human_approval(action, tool_name, params)` - Request authorization for sensitive operations
+- `request_human_input(question, context)` - Request user input for missing information
 
 **Interrupt Types:**
 - `authorization` - Tool execution authorization required
-- `param_required` - Missing required parameters
+- `input_required` - User input needed
 
 **Flow:**
-1. Executor creates `pending_config` using config builders, sets `final_status="waiting_input"`
-2. SSE sends "interrupt" event to frontend with `pending_config`
-3. User interacts with ConfigModal (approve/edit/reject)
-4. Frontend calls `POST /chat/resume/{thread_id}` with `action` field
-5. Backend uses `HITLMessageEncoder.encode()` to create structured message
-6. Executor uses `HITLMessageDecoder.decode()` to parse and resume execution
+1. Agent calls HITL tool (e.g., `request_human_approval`)
+2. Tool invokes `interrupt(data)` - pauses graph execution
+3. API detects interrupt via `state.tasks` and sends "interrupt" SSE event
+4. User interacts with ConfigModal (approve/edit/reject/confirm)
+5. Frontend calls `POST /chat/resume/{thread_id}` with `action` field
+6. Backend resumes with `Command(resume=resume_data)`
+7. Tool receives `human_response` and returns result
+8. Agent continues execution
 
-### Context Management (`agents/context_manager.py`)
-The `ContextManager` class handles token budget enforcement:
-- `compress_completed_steps()` - Replaces tool call/result pairs with summaries
-- `trim_tool_metadata()` - Removes verbose internal metadata from ToolMessages
-- `enforce_token_budget()` - Trims middle messages, preserving first and recent
-- `optimize_context()` - Applies all three in sequence
+**Supported Actions:**
+- `approve` - Execute with original parameters
+- `reject` / `cancel` - Cancel execution
+- `edit` - Modify parameters before execution
+- `confirm` - Submit user input
 
-### State Helpers (`agents/state.py`)
-Utility functions for state management:
-- `create_initial_state()` - Creates default AgentState
-- `create_todo_step()` - Creates a TodoStep
-- `create_replan_context()` - Creates ReplanContext
-- `skip_remaining_steps()` - Marks remaining steps as skipped
+### Context Management (`agents/middleware/context.py`)
 
-### Tool Registry (`tools/base.py`)
-The `ToolRegistry` class manages tool registration:
-- `register()` - Register a tool (auto-called by @tool decorator)
-- `get(name)` - Get a specific tool
-- `get_all()` - Get all registered tools
-- `clear()` - Clear all registered tools
+Implemented via `pre_model_hook` in `create_react_agent`:
 
-### Dynamic Replanning (`agents/replanner.py`, `agents/goal_evaluator.py`)
+**`ContextConfig` dataclass:**
+- `max_tokens: int = 4000` - Token budget
+- `compress_tool_results: bool = True` - Truncate long tool outputs
+- `tool_result_max_length: int = 500` - Max length for tool results
+- `preserve_recent_messages: int = 10` - Keep last N messages
 
-Intelligent task recovery and early completion detection.
+**Middleware functions:**
+- `create_context_middleware(config, summarization_model)` - Returns `pre_model_hook` function
+- `_compress_tool_messages()` - Truncates ToolMessage content
+- `_trim_messages_smart()` - Intelligent message trimming (preserves system + first + recent)
 
-**Replan Strategies:**
-| Strategy | When Used | Action |
-|----------|-----------|--------|
-| `replace_failed` | Tool-specific error | Replace step with alternative tool |
-| `alternative_approach` | Approach fundamentally broken | Redesign remaining steps |
-| `skip_failed` | Step not critical | Mark as skipped, continue |
-| `abort` | Unrecoverable | Go to validator with failure |
+**Hook behavior:**
+Returns `{"llm_input_messages": [...]}` - modified messages for LLM input only (doesn't mutate state)
+
+### Todo Management (`agents/tools/todos.py`)
+
+Todo tools use LangGraph Store for persistence:
+
+**Tools:**
+- `write_todos(goal, steps, config)` - Create/update task plan
+- `read_todos(config)` - Read current plan and progress
+- `update_todo_step(step_index, status, result, config)` - Update step status
 
 **TodoStep Status Values:** `pending`, `running`, `completed`, `failed`, `skipped`
+
+**Storage:** Uses `get_store()` with namespace `("todos",)` and thread_id as key
+
+### SubAgent Tools (`agents/subagents/`)
+
+SubAgents are implemented via `agent.as_tool()` pattern:
+
+**Available SubAgents:**
+- `planner_expert` - Task planning and decomposition
+- `validator_expert` - Result validation and quality assessment
+- `research_expert` - Deep research with knowledge base access
+
+**Implementation:** Each SubAgent is a separate `create_react_agent` instance converted to a tool via `.as_tool(name, description, arg_types)`
 
 ## API Endpoints (v1)
 
@@ -183,10 +238,13 @@ Intelligent task recovery and early completion detection.
 **Health:**
 - `GET /health` - Health check (returns status and version)
 
-**SSE Event Types:**
-- `update` - Streaming updates (node, content, todo_list, status, pending_config)
-- `interrupt` - HITL interrupt with pending_config
-- `done` - Completion with final status and todo_list
+**SSE Event Types (v2):**
+- `update` - Streaming updates from `astream_events`:
+  - `on_chat_model_stream` → content chunks
+  - `on_tool_start` → tool invocation start
+  - `on_tool_end` → tool completion
+- `interrupt` - HITL interrupt (detected via `state.tasks`)
+- `done` - Completion with final status and todo_list from Store
 - `error` - Error events
 
 ## Environment Configuration
@@ -219,33 +277,66 @@ Dev uses InMemorySaver (state lost on restart). Production requires Redis.
 
 ## Adding New Tools
 
-Create `@tool` decorated functions in `backend/app/tools/base.py`:
+Create `@tool` decorated functions in `backend/app/agents/tools/business.py`:
+
 ```python
-@tool(args_schema=MySchema)
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+
+class MyToolInput(BaseModel):
+    """Tool input schema"""
+    param: str = Field(description="Parameter description")
+
+@tool(args_schema=MyToolInput)
 def my_tool(param: str) -> str:
-    """Tool description for LLM."""
+    """Tool description for LLM. Be clear and concise."""
     return result
+
+# Register in get_business_tools()
+def get_business_tools() -> list[BaseTool]:
+    return [
+        search_knowledge,
+        my_tool,  # Add here
+        # ... other tools
+    ]
 ```
 
-Tool schemas auto-generate frontend ConfigFormField for parameter forms.
+**Key points:**
+- Tool docstrings are shown to the LLM - make them clear and actionable
+- Use Pydantic schemas for structured inputs
+- For HITL-required tools, add tool name to `tools_require_approval` in config.py
+- Tools with `config: RunnableConfig` parameter can access thread_id and Store
 
 ## Configuration Options (`config.py`)
 
-Key settings:
-- `message_token_limit: int = 4000` - Token budget for context
-- `max_steps: int = 20` - Maximum execution steps
-- `max_retries: int = 3` - Tool retry count
-- `tool_timeout: int = 60` - Tool execution timeout (seconds)
-- `recursion_limit: int = 25` - LangGraph recursion limit
-- `tools_require_approval: list[str]` - Tools requiring HITL authorization
-- `require_approval_for_all_tools: bool` - Global HITL flag
+Simplified v2 configuration:
 
-**Dynamic Replanning Settings:**
-- `replan_enabled: bool = True` - Enable/disable replanning feature
-- `max_replans: int = 3` - Maximum replan attempts per task
-- `goal_evaluation_enabled: bool = True` - Enable/disable early goal detection
-- `replan_on_max_retries: bool = True` - Trigger replan when step hits max retries
+**Agent Settings:**
+- `message_token_limit: int = 4000` - Token budget for context
+- `recursion_limit: int = 50` - LangGraph recursion limit
+
+**Human-in-the-Loop:**
+- `tools_require_approval: list[str] = ["write_file", "http_request", "send_email"]` - Tools requiring HITL
+- `require_approval_for_all_tools: bool = False` - Global HITL flag
+
+**Note:** v2 architecture removed `max_steps`, `max_retries`, `tool_timeout`, and replanning settings. The ReAct agent handles retries and replanning autonomously based on its reasoning.
+
+## Architecture Documentation
+
+Detailed v2 design rationale in `docs/architecture-v2.md`:
+- Design philosophy: "Agent First" approach using LangGraph native capabilities
+- Comparison with v1 architecture
+- Code examples for all components
+- API layer design with SSE streaming
 
 ## Design System
 
 Neo-Swiss style: Lavender Purple (#A78BFA), Sky Blue (#60A5FA), Mint Green (#34D399). Grid layout with generous whitespace.
+
+## Backward Compatibility Notes
+
+The `agents/__init__.py` provides deprecated aliases:
+- `get_agent_graph()` → use `get_agent()` instead
+- `build_agent_graph()` → use `create_main_agent()` instead
+
+Legacy files (supervisor.py, planner.py, executor.py, validator.py, hitl.py, graph.py, state.py) may still exist but are unused in v2 architecture.
