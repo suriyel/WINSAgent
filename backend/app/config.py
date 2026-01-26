@@ -4,12 +4,18 @@
 简化后的配置，适配新的 Agent 架构
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     """应用配置"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # ============== LLM 配置 ==============
     dashscope_api_key: str = ""
@@ -65,10 +71,6 @@ class Settings(BaseSettings):
     def mysql_async_url(self) -> str:
         """异步 MySQL URL"""
         return f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 @lru_cache
