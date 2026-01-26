@@ -8,8 +8,12 @@
 
 ```
 langgraph >= 1.0.6          # Agent 运行时
-langchain >= 1.2.6          # 工具和模型集成
-langmem >= 0.0.14           # 短期记忆管理 (SummarizationNode)
+langchain >= 1.2.5          # 工具和模型集成
+langchain-core >= 1.2.7     # 核心类和消息接口
+langchain-community >= 0.3.14  # 社区集成
+langchain-openai >= 0.3.5   # OpenAI 兼容端点
+langgraph-checkpoint >= 2.0.11  # 状态持久化
+langmem >= 0.0.14           # 短期记忆管理 (SummarizationNode, 可选)
 deepagents >= 0.3.7         # 参考架构 (可选直接使用)
 ```
 

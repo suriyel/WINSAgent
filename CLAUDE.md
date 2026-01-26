@@ -8,7 +8,7 @@ WINS Agent is an AI task orchestration platform built on **LangGraph 1.0** and *
 
 **Tech Stack:**
 - **Frontend:** React 18, Vite, TailwindCSS, Zustand (state), TanStack Query
-- **Backend:** FastAPI, LangGraph 1.0.6 (`create_react_agent`), LangChain 1.2.6
+- **Backend:** FastAPI, LangGraph 1.0.6 (`create_react_agent`), LangChain 1.2.5
 - **LLM:** Qwen3-72B-Instruct (via DashScope OpenAI-compatible API)
 - **Vector Store:** FAISS with DashScope Embeddings
 - **Persistence:** Redis (checkpointer, prod), InMemorySaver (dev), InMemoryStore (sessions)
