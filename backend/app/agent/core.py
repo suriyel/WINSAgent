@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddleware
 from langchain.agents.middleware.todo import TodoListMiddleware
@@ -69,8 +70,16 @@ def build_agent():
             )
         )
 
+    # 1. 配置通义千问的 OpenAI 兼容实例
+    llm = ChatOpenAI(
+        model=settings.llm_model,  # 例如 "qwen-max"
+        openai_api_key=settings.llm_api_key,
+        openai_api_base=settings.llm_base_url,
+        streaming=True
+    )
+
     agent = create_agent(
-        model=settings.llm_model,
+        model=llm,
         tools=all_tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=middleware,

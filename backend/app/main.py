@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+import uvicorn
 
 
 @asynccontextmanager
@@ -54,3 +55,7 @@ app.include_router(tools_router, prefix="/api")
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    # 这里的 app.main:app 对应你命令行里的路径
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

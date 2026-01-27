@@ -21,16 +21,17 @@ def _get_embeddings() -> Embeddings:
     Falls back to a simple fake/deterministic embedding when no API key
     is available so that the application can still boot for UI development.
     """
-    if settings.llm_api_key:
-        try:
-            from langchain_openai import OpenAIEmbeddings
-
-            return OpenAIEmbeddings(
-                api_key=settings.llm_api_key,
-                **({"base_url": settings.llm_base_url} if settings.llm_base_url else {}),
-            )
-        except Exception:
-            logger.warning("OpenAI embeddings unavailable, using fake embeddings")
+    # if settings.llm_api_key:
+    #     try:
+    #         from langchain_openai import OpenAIEmbeddings
+    #
+    #         return OpenAIEmbeddings(
+    #             model="text-embedding-v3",
+    #             api_key=settings.llm_api_key,
+    #             **({"base_url": settings.llm_base_url} if settings.llm_base_url else {}),
+    #         )
+    #     except Exception:
+    #         logger.warning("OpenAI embeddings unavailable, using fake embeddings")
 
     from langchain_core.embeddings import FakeEmbeddings
     return FakeEmbeddings(size=384)

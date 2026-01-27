@@ -1,0 +1,5 @@
+faiss_indexes
+__pycache__
+/frontend/node_modules
+/.idea
+/frontend/package-lock.json
