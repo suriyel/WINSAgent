@@ -1,0 +1,116 @@
+"""Map agent.stream() output to structured SSE events."""
+
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Any, AsyncIterator
+
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+
+
+def _sse(event_type: str, data: dict[str, Any]) -> str:
+    """Format a single SSE frame."""
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event_type}\ndata: {payload}\n\n"
+
+
+async def map_agent_stream_to_sse(
+    stream,
+    thread_id: str,
+) -> AsyncIterator[str]:
+    """Consume an agent stream and yield SSE-formatted strings.
+
+    Event types emitted:
+      - thinking      : LLM token-level output
+      - tool.call     : Agent decided to call a tool
+      - tool.result   : Tool returned a result
+      - todo.state    : TODO list state updated
+      - hitl.pending  : Human-in-the-Loop approval required
+      - message       : Final assistant message
+      - error         : Error occurred
+    """
+
+    try:
+        for event in stream:
+            # --- agent event dict structure varies by LangGraph version ---
+            # Common shapes:
+            #   {"agent": {"messages": [AIMessage(...)]}}
+            #   {"tools": {"messages": [ToolMessage(...)]}}
+            #   {"__interrupt__": [...]}
+
+            # Handle interrupt (HITL)
+            if "__interrupt__" in event:
+                interrupts = event["__interrupt__"]
+                for intr in interrupts:
+                    value = intr.value if hasattr(intr, "value") else intr
+                    yield _sse("hitl.pending", {
+                        "execution_id": str(uuid.uuid4()),
+                        "tool_name": value.get("tool_name", "unknown") if isinstance(value, dict) else "unknown",
+                        "params": value.get("args", {}) if isinstance(value, dict) else {},
+                        "schema": value.get("schema", {}) if isinstance(value, dict) else {},
+                        "description": value.get("description", "") if isinstance(value, dict) else str(value),
+                    })
+                continue
+
+            # Extract messages from the event
+            messages = None
+            node_name = None
+            for key, val in event.items():
+                if key.startswith("__"):
+                    continue
+                if isinstance(val, dict) and "messages" in val:
+                    messages = val["messages"]
+                    node_name = key
+                    break
+
+            if not messages:
+                continue
+
+            for msg in messages:
+                # --- AI Message (model output) ---
+                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                    # Tool calls
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            yield _sse("tool.call", {
+                                "tool_name": tc.get("name", ""),
+                                "params": tc.get("args", {}),
+                                "execution_id": tc.get("id", str(uuid.uuid4())),
+                            })
+                    # Text content (thinking / final message)
+                    if msg.content:
+                        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        if content.strip():
+                            # If there are no tool calls, this is likely a final message
+                            if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                yield _sse("message", {"content": content})
+                            else:
+                                yield _sse("thinking", {"token": content})
+
+                # --- Tool Message (tool result) ---
+                elif isinstance(msg, ToolMessage):
+                    status = "failed" if getattr(msg, "status", None) == "error" else "success"
+                    yield _sse("tool.result", {
+                        "execution_id": getattr(msg, "tool_call_id", str(uuid.uuid4())),
+                        "result": msg.content if isinstance(msg.content, str) else str(msg.content),
+                        "status": status,
+                    })
+
+            # --- Check for todo state updates in the event values ---
+            for key, val in event.items():
+                if isinstance(val, dict) and "todos" in val:
+                    todos = val["todos"]
+                    yield _sse("todo.state", {
+                        "task_id": thread_id,
+                        "steps": [
+                            {"content": t.get("content", ""), "status": t.get("status", "pending")}
+                            for t in todos
+                        ] if isinstance(todos, list) else [],
+                    })
+
+    except Exception as exc:
+        yield _sse("error", {
+            "code": "AGENT_ERROR",
+            "message": str(exc),
+        })
