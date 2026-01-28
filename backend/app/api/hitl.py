@@ -21,21 +21,31 @@ async def hitl_decide(execution_id: str, decision: HITLDecision):
     agent = get_agent()
 
     # Build the human response based on the decision
+    decisions = []
     if decision.action == HITLAction.approve:
         human_response = {"type": "approve"}
     elif decision.action == HITLAction.edit:
-        human_response = {"type": "edit", "args": decision.edited_params}
+        human_response = {"type": "edit",
+                          "edited_action": {
+                              "name": decision.tool_name,
+                              "args": decision.edited_params
+                          }}
     elif decision.action == HITLAction.reject:
         human_response = {"type": "reject"}
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {decision.action}")
 
+    decisions.append(human_response)
     try:
         from langgraph.types import Command
 
         # Resume the agent with the human decision
         config = {"configurable": {"thread_id": execution_id}}
-        agent.invoke(Command(resume=human_response), config=config)
+        agent.invoke(
+            Command(resume={
+                "decisions":human_response
+            }),
+            config=config)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

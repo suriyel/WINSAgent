@@ -24,13 +24,14 @@ export async function fetchTools() {
 
 export async function submitHITLDecision(
   executionId: string,
+  tool_name:string,
   action: "approve" | "edit" | "reject",
   editedParams: Record<string, unknown> = {}
 ) {
   const res = await fetch(`${BASE}/hitl/${executionId}/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, edited_params: editedParams }),
+    body: JSON.stringify({action, tool_name, edited_params: editedParams}),
   });
   return res.json();
 }

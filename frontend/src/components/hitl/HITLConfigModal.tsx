@@ -20,7 +20,7 @@ export default function HITLConfigModal() {
       setIsEditing(true);
       return;
     }
-    submitHITL("edit", editedParams);
+    submitHITL("edit", pendingHITL.tool_name, editedParams);
     setIsEditing(false);
   };
 

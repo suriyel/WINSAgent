@@ -44,13 +44,18 @@ async def map_agent_stream_to_sse(
                 interrupts = event["__interrupt__"]
                 for intr in interrupts:
                     value = intr.value if hasattr(intr, "value") else intr
-                    yield _sse("hitl.pending", {
-                        "execution_id": str(uuid.uuid4()),
-                        "tool_name": value.get("tool_name", "unknown") if isinstance(value, dict) else "unknown",
-                        "params": value.get("args", {}) if isinstance(value, dict) else {},
-                        "schema": value.get("schema", {}) if isinstance(value, dict) else {},
-                        "description": value.get("description", "") if isinstance(value, dict) else str(value),
-                    })
+                    if "action_requests" in value and "review_configs" in value:
+                        action_requests = value["action_requests"]
+                        review_configs = value["review_configs"]
+                        for i, action_request in enumerate(action_requests):
+                            review_config = review_configs[i]
+                            yield _sse("hitl.pending", {
+                                "execution_id": str(uuid.uuid4()),
+                                "tool_name": action_request.get("name", "unknown") if isinstance(value, dict) else "unknown",
+                                "params": action_request.get("args", {}) if isinstance(value, dict) else {},
+                                "schema": review_config.get("allowed_decisions", {}) if isinstance(value, dict) else {},
+                                "description": action_request.get("description", "") if isinstance(value, dict) else str(value),
+                            })
                 continue
 
             # Extract messages from the event

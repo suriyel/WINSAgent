@@ -38,7 +38,7 @@ interface ChatState {
   setActiveConversation: (id: string) => void;
   sendMessage: (content: string) => void;
   handleSSEEvent: (eventType: SSEEventType, data: Record<string, unknown>) => void;
-  submitHITL: (action: HITLAction, editedParams?: Record<string, unknown>) => void;
+  submitHITL: (action: HITLAction, tool_name?: string, editedParams?: Record<string, unknown>) => void;
   stopStreaming: () => void;
 }
 
@@ -224,7 +224,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  async submitHITL(action: HITLAction, editedParams?: Record<string, unknown>) {
+  async submitHITL(action: HITLAction, tool_name?: string, editedParams?: Record<string, unknown>) {
     const pending = get().pendingHITL;
     if (!pending) return;
 
@@ -232,7 +232,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!convId) return;
 
     try {
-      await submitHITLDecision(convId, action, editedParams ?? {});
+      await submitHITLDecision(convId, tool_name ?? "unknown", action, editedParams ?? {});
       set({ pendingHITL: null });
     } catch {
       // Error handling can be expanded

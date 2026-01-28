@@ -50,6 +50,7 @@ class ChatRequest(BaseModel):
 
 class HITLDecision(BaseModel):
     action: HITLAction
+    tool_name: str
     edited_params: dict[str, Any] = Field(default_factory=dict)
 
 

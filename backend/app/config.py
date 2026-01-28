@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 获取项目根目录（backend/）
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
 
 class Settings(BaseSettings):
     # LLM
@@ -26,7 +29,11 @@ class Settings(BaseSettings):
     port: int = 8000
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
