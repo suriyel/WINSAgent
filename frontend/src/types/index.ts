@@ -24,6 +24,7 @@ export interface Message {
   toolCalls?: ToolCallInfo[];
   todoSteps?: TodoStep[];
   hitlPending?: HITLPending;
+  suggestions?: SuggestionGroup;  // 建议回复选项
   isStreaming?: boolean;
   timestamp: number;
 }
@@ -56,6 +57,20 @@ export interface HITLPending {
   description?: string;
 }
 
+/** 建议选项 - 用于快速回复 */
+export interface Suggestion {
+  id: string;
+  text: string;           // 显示文本
+  value?: string;         // 发送的值（可选，默认使用 text）
+}
+
+/** 建议选项组 - 支持单选/多选 */
+export interface SuggestionGroup {
+  suggestions: Suggestion[];
+  multiSelect?: boolean;  // 是否多选，默认单选
+  prompt?: string;        // 可选的提示文本
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -74,6 +89,7 @@ export type SSEEventType =
   | "hitl.pending"
   | "todo.state"
   | "message"
+  | "suggestions"
   | "error"
   | "done";
 

@@ -27,6 +27,7 @@ async def map_agent_stream_to_sse(
       - tool.result   : Tool returned a result
       - todo.state    : TODO list state updated
       - hitl.pending  : Human-in-the-Loop approval required
+      - suggestions   : Quick reply suggestions (from SuggestionsMiddleware)
       - message       : Final assistant message
       - error         : Error occurred
     """
@@ -102,9 +103,13 @@ async def map_agent_stream_to_sse(
                         "status": status,
                     })
 
-            # --- Check for todo state updates in the event values ---
+            # --- Check for state updates in the event values ---
             for key, val in event.items():
-                if isinstance(val, dict) and "todos" in val:
+                if not isinstance(val, dict):
+                    continue
+
+                # TODO state updates
+                if "todos" in val:
                     todos = val["todos"]
                     yield _sse("todo.state", {
                         "task_id": thread_id,
@@ -112,6 +117,18 @@ async def map_agent_stream_to_sse(
                             {"content": t.get("content", ""), "status": t.get("status", "pending")}
                             for t in todos
                         ] if isinstance(todos, list) else [],
+                    })
+
+                # Suggestions state updates (from SuggestionsMiddleware)
+                if "suggestions" in val and val["suggestions"] is not None:
+                    suggestions_data = val["suggestions"]
+                    # Handle both Pydantic model and dict
+                    if hasattr(suggestions_data, "model_dump"):
+                        suggestions_data = suggestions_data.model_dump()
+                    yield _sse("suggestions", {
+                        "suggestions": suggestions_data.get("suggestions", []),
+                        "multi_select": suggestions_data.get("multi_select", False),
+                        "prompt": suggestions_data.get("prompt"),
                     })
 
     except Exception as exc:

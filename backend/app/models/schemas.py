@@ -143,3 +143,17 @@ class SSEMessageEvent(BaseModel):
 class SSEErrorEvent(BaseModel):
     code: str
     message: str
+
+
+class Suggestion(BaseModel):
+    """单个建议选项"""
+    id: str
+    text: str           # 显示文本
+    value: str | None = None  # 发送的值（可选，默认使用 text）
+
+
+class SSESuggestionsEvent(BaseModel):
+    """建议选项事件"""
+    suggestions: list[Suggestion]
+    multi_select: bool = False  # 是否多选
+    prompt: str | None = None   # 可选的提示文本

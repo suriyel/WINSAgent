@@ -12,6 +12,7 @@ const SSE_EVENT_TYPES: SSEEventType[] = [
   "hitl.pending",
   "todo.state",
   "message",
+  "suggestions",
   "error",
   "done",
 ];

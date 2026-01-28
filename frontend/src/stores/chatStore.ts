@@ -7,6 +7,8 @@ import type {
   HITLPending,
   Message,
   SSEEventType,
+  Suggestion,
+  SuggestionGroup,
   TodoStep,
   ToolCallInfo,
 } from "../types";
@@ -222,6 +224,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             pendingHITL: hitlData,
             isStreaming: false, // Pause streaming while waiting for HITL decision
           };
+        }
+
+        case "suggestions": {
+          // Attach suggestions to the last assistant message
+          if (last && last.role === "assistant") {
+            const suggestionsData = data.suggestions as Suggestion[];
+            const multiSelect = data.multi_select as boolean | undefined;
+            const prompt = data.prompt as string | undefined;
+            last.suggestions = {
+              suggestions: suggestionsData,
+              multiSelect: multiSelect ?? false,
+              prompt,
+            };
+            msgs[lastIdx] = last;
+          }
+          return { messages: msgs };
         }
 
         case "error": {

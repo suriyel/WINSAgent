@@ -11,6 +11,7 @@ from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddlewa
 from langchain.agents.middleware.todo import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.agent.middleware.suggestions import SuggestionsMiddleware
 from app.agent.tools.demo_tools import register_demo_tools
 from app.agent.tools.hil import CustomHumanInTheLoopMiddleware
 from app.agent.tools.knowledge import register_knowledge_tools
@@ -33,6 +34,40 @@ SYSTEM_PROMPT = """\
 - 工具调用失败时，整个任务终止，不要重试
 - 需要HITL确认的操作会暂停等待用户批准
 - 始终用中文回复用户
+
+## 建议回复选项
+
+在每次回复结束时，你应该提供 2-4 个建议的快捷回复选项，帮助用户快速选择下一步操作。使用以下格式：
+
+**单选模式**（用户只能选择一个）:
+```suggestions
+{
+  "suggestions": [
+    {"text": "选项1文本"},
+    {"text": "选项2文本"},
+    {"text": "选项3文本"}
+  ]
+}
+```
+
+**多选模式**（用户可以选择多个，如同时查询多个客户）:
+```suggestions
+{
+  "suggestions": [
+    {"text": "选项1"},
+    {"text": "选项2"},
+    {"text": "选项3"}
+  ],
+  "multi_select": true,
+  "prompt": "请选择需要查询的项目（可多选）"
+}
+```
+
+建议选项应该：
+- 与当前对话上下文相关
+- 预测用户可能的下一步操作
+- 使用简洁明确的文字
+- 包含常见的后续操作如"继续"、"查看详情"、"取消"等
 """
 
 # In-memory checkpointer for dev/validation stage
@@ -61,6 +96,7 @@ def build_agent():
 
     middleware = [
         TodoListMiddleware(),
+        SuggestionsMiddleware(),
     ]
     # Only add HITL middleware when there are tools requiring it
     if hitl_config:

@@ -2,6 +2,7 @@ import type { Message } from "../../types";
 import ThinkingIndicator from "./ThinkingIndicator";
 import TodoStepper from "../todo/TodoStepper";
 import HITLInlineCard from "../hitl/HITLInlineCard";
+import SuggestionChips from "./SuggestionChips";
 
 interface Props {
   message: Message;
@@ -88,6 +89,11 @@ export default function MessageBubble({ message }: Props) {
             <div className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">
               {message.content}
             </div>
+          )}
+
+          {/* Suggestion chips - 建议选项 */}
+          {message.suggestions && !message.isStreaming && (
+            <SuggestionChips suggestionGroup={message.suggestions} />
           )}
 
           {/* Streaming indicator */}
