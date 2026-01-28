@@ -224,19 +224,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  async submitHITL(action: HITLAction, tool_name?: string, editedParams?: Record<string, unknown>) {
+  submitHITL(action: HITLAction, tool_name?: string, editedParams?: Record<string, unknown>) {
     const pending = get().pendingHITL;
     if (!pending) return;
 
     const convId = get().activeConversationId;
     if (!convId) return;
 
-    try {
-      await submitHITLDecision(convId, tool_name ?? "unknown", action, editedParams ?? {});
-      set({ pendingHITL: null });
-    } catch {
-      // Error handling can be expanded
-    }
+    // Clear pending HITL and set streaming state
+    set({ pendingHITL: null, isStreaming: true });
+
+    const controller = submitHITLDecision(
+      convId,
+      tool_name ?? pending.tool_name ?? "unknown",
+      action,
+      editedParams ?? {},
+      (eventType, data) => get().handleSSEEvent(eventType, data),
+      () => {
+        // Done — finalize the streaming message
+        set((s) => {
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant") {
+            msgs[msgs.length - 1] = { ...last, isStreaming: false };
+          }
+          return { messages: msgs, isStreaming: false, _sseController: null };
+        });
+      },
+      () => {
+        set({ isStreaming: false, _sseController: null });
+      }
+    );
+
+    set({ _sseController: controller });
   },
 
   stopStreaming() {

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
-from app.agent.core import get_agent, get_checkpointer
+from app.agent.core import get_agent
 from app.models.schemas import HITLAction, HITLDecision
+from app.sse.event_mapper import map_agent_stream_to_sse
 
 router = APIRouter()
 
@@ -17,6 +19,8 @@ async def hitl_decide(execution_id: str, decision: HITLDecision):
     The execution_id is the thread_id (conversation_id) used when the
     agent was interrupted. The agent is resumed with the human decision
     pushed as a Command to resolve the interrupt.
+
+    Returns an SSE stream with tool results and agent response.
     """
     agent = get_agent()
 
@@ -36,17 +40,28 @@ async def hitl_decide(execution_id: str, decision: HITLDecision):
         raise HTTPException(status_code=400, detail=f"Unknown action: {decision.action}")
 
     decisions.append(human_response)
-    try:
-        from langgraph.types import Command
 
-        # Resume the agent with the human decision
-        config = {"configurable": {"thread_id": execution_id}}
-        result = agent.invoke(
-            Command(resume={
-                "decisions":decisions
-            }),
-            config=config)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    from langgraph.types import Command
 
-    return {"status": "ok", "action": decision.action}
+    # Resume the agent with the human decision using stream mode
+    config = {"configurable": {"thread_id": execution_id}}
+    stream = agent.stream(
+        Command(resume={"decisions": decisions}),
+        config=config,
+        stream_mode="updates",
+    )
+
+    async def generate():
+        async for sse_frame in map_agent_stream_to_sse(stream, execution_id):
+            yield sse_frame
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
