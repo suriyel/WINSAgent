@@ -41,9 +41,9 @@ async def hitl_decide(execution_id: str, decision: HITLDecision):
 
         # Resume the agent with the human decision
         config = {"configurable": {"thread_id": execution_id}}
-        agent.invoke(
+        result = agent.invoke(
             Command(resume={
-                "decisions":human_response
+                "decisions":decisions
             }),
             config=config)
     except Exception as exc:

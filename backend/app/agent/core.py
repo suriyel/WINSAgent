@@ -12,6 +12,7 @@ from langchain.agents.middleware.todo import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.tools.demo_tools import register_demo_tools
+from app.agent.tools.hil import CustomHumanInTheLoopMiddleware
 from app.agent.tools.knowledge import register_knowledge_tools
 from app.agent.subagents.data_analysis import register_subagent_tools
 from app.agent.tools.registry import tool_registry
@@ -64,7 +65,7 @@ def build_agent():
     # Only add HITL middleware when there are tools requiring it
     if hitl_config:
         middleware.append(
-            HumanInTheLoopMiddleware(
+            CustomHumanInTheLoopMiddleware(
                 interrupt_on=hitl_config,
                 description_prefix="该操作需要您确认",
             )
