@@ -11,6 +11,7 @@ from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddlewa
 from langchain.agents.middleware.todo import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.agent.middleware.missing_params import MissingParamsMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
 from app.agent.tools.demo_tools import register_demo_tools
 from app.agent.tools.hil import CustomHumanInTheLoopMiddleware
@@ -93,11 +94,22 @@ def build_agent():
 
     all_tools = tool_registry.get_all_tools()
     hitl_config = tool_registry.get_hitl_config()
+    param_edit_config = tool_registry.get_param_edit_config()
 
     middleware = [
         TodoListMiddleware(),
         SuggestionsMiddleware(),
     ]
+
+    # Add MissingParams middleware when there are tools with param edit schema
+    if param_edit_config:
+        middleware.append(
+            MissingParamsMiddleware(
+                tools_with_param_edit=param_edit_config,
+                description_prefix="请填写以下参数",
+            )
+        )
+
     # Only add HITL middleware when there are tools requiring it
     if hitl_config:
         middleware.append(

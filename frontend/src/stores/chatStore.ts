@@ -6,6 +6,8 @@ import type {
   HITLAction,
   HITLPending,
   Message,
+  ParamsAction,
+  ParamsPending,
   SSEEventType,
   Suggestion,
   SuggestionGroup,
@@ -33,6 +35,9 @@ interface ChatState {
   // HITL pending decision
   pendingHITL: HITLPending | null;
 
+  // Missing params pending (for MissingParamsMiddleware)
+  pendingParams: ParamsPending | null;
+
   // Active SSE controller
   _sseController: AbortController | null;
 
@@ -41,6 +46,7 @@ interface ChatState {
   sendMessage: (content: string) => void;
   handleSSEEvent: (eventType: SSEEventType, data: Record<string, unknown>) => void;
   submitHITL: (action: HITLAction, tool_name?: string, editedParams?: Record<string, unknown>) => void;
+  submitParams: (action: ParamsAction, editedParams?: Record<string, unknown>) => void;
   stopStreaming: () => void;
 }
 
@@ -57,6 +63,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   thinkingBuffer: "",
   todoSteps: {},
   pendingHITL: null,
+  pendingParams: null,
   _sseController: null,
 
   setActiveConversation(id: string) {
@@ -226,6 +233,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
         }
 
+        case "params.pending": {
+          const paramsData: ParamsPending = {
+            execution_id: data.execution_id as string,
+            tool_name: data.tool_name as string,
+            tool_call_id: data.tool_call_id as string,
+            description: data.description as string | undefined,
+            current_params: data.current_params as Record<string, unknown>,
+            missing_params: data.missing_params as string[],
+            params_schema: data.params_schema as Record<string, import("../types").ParamSchema>,
+          };
+          // Attach params info to the last assistant message for inline rendering
+          if (last && last.role === "assistant") {
+            last.paramsPending = paramsData;
+            last.isStreaming = false; // Pause streaming while waiting for params
+            msgs[lastIdx] = last;
+          }
+          return {
+            messages: msgs,
+            pendingParams: paramsData,
+            isStreaming: false, // Pause streaming while waiting for params input
+          };
+        }
+
         case "suggestions": {
           // Attach suggestions to the last assistant message
           if (last && last.role === "assistant") {
@@ -278,6 +308,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
       convId,
       tool_name ?? pending.tool_name ?? "unknown",
       action,
+      editedParams ?? {},
+      (eventType, data) => get().handleSSEEvent(eventType, data),
+      () => {
+        // Done — finalize the streaming message
+        set((s) => {
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant") {
+            msgs[msgs.length - 1] = { ...last, isStreaming: false };
+          }
+          return { messages: msgs, isStreaming: false, _sseController: null };
+        });
+      },
+      () => {
+        set({ isStreaming: false, _sseController: null });
+      }
+    );
+
+    set({ _sseController: controller });
+  },
+
+  submitParams(action: ParamsAction, editedParams?: Record<string, unknown>) {
+    const pending = get().pendingParams;
+    if (!pending) return;
+
+    const convId = get().activeConversationId;
+    if (!convId) return;
+
+    // Clear pending params from both global state and the message
+    set((state) => {
+      const msgs = [...state.messages];
+      const lastIdx = msgs.length - 1;
+      if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+        msgs[lastIdx] = { ...msgs[lastIdx], paramsPending: undefined, isStreaming: true };
+      }
+      return { messages: msgs, pendingParams: null, isStreaming: true };
+    });
+
+    // Submit params decision to backend (reuses HITL endpoint with different action)
+    const controller = submitHITLDecision(
+      convId,
+      pending.tool_name,
+      action === "submit" ? "approve" : "reject",  // Map params action to HITL action
       editedParams ?? {},
       (eventType, data) => get().handleSSEEvent(eventType, data),
       () => {

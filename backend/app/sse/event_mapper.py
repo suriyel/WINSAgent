@@ -22,14 +22,15 @@ async def map_agent_stream_to_sse(
     """Consume an agent stream and yield SSE-formatted strings.
 
     Event types emitted:
-      - thinking      : LLM token-level output
-      - tool.call     : Agent decided to call a tool
-      - tool.result   : Tool returned a result
-      - todo.state    : TODO list state updated
-      - hitl.pending  : Human-in-the-Loop approval required
-      - suggestions   : Quick reply suggestions (from SuggestionsMiddleware)
-      - message       : Final assistant message
-      - error         : Error occurred
+      - thinking       : LLM token-level output
+      - tool.call      : Agent decided to call a tool
+      - tool.result    : Tool returned a result
+      - todo.state     : TODO list state updated
+      - hitl.pending   : Human-in-the-Loop approval required
+      - params.pending : Missing parameters need user input (from MissingParamsMiddleware)
+      - suggestions    : Quick reply suggestions (from SuggestionsMiddleware)
+      - message        : Final assistant message
+      - error          : Error occurred
     """
 
     try:
@@ -40,11 +41,27 @@ async def map_agent_stream_to_sse(
             #   {"tools": {"messages": [ToolMessage(...)]}}
             #   {"__interrupt__": [...]}
 
-            # Handle interrupt (HITL)
+            # Handle interrupt (HITL or Params Edit)
             if "__interrupt__" in event:
                 interrupts = event["__interrupt__"]
                 for intr in interrupts:
                     value = intr.value if hasattr(intr, "value") else intr
+
+                    # Handle MissingParamsMiddleware interrupt (params_edit type)
+                    if isinstance(value, dict) and value.get("type") == "params_edit":
+                        info = value.get("info", {})
+                        yield _sse("params.pending", {
+                            "execution_id": str(uuid.uuid4()),
+                            "tool_name": info.get("tool_name", "unknown"),
+                            "tool_call_id": info.get("tool_call_id", ""),
+                            "description": info.get("description", "请填写缺省参数"),
+                            "current_params": info.get("current_params", {}),
+                            "missing_params": info.get("missing_params", []),
+                            "params_schema": info.get("params_schema", {}),
+                        })
+                        continue
+
+                    # Handle HumanInTheLoopMiddleware interrupt
                     if "action_requests" in value and "review_configs" in value:
                         action_requests = value["action_requests"]
                         review_configs = value["review_configs"]

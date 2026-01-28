@@ -8,6 +8,8 @@ export type TaskStatus = "pending" | "in_progress" | "completed" | "failed";
 
 export type HITLAction = "approve" | "edit" | "reject";
 
+export type ParamsAction = "submit" | "cancel";
+
 // --- Data models ---
 
 export interface Conversation {
@@ -24,6 +26,7 @@ export interface Message {
   toolCalls?: ToolCallInfo[];
   todoSteps?: TodoStep[];
   hitlPending?: HITLPending;
+  paramsPending?: ParamsPending;  // 缺省参数待填写
   suggestions?: SuggestionGroup;  // 建议回复选项
   isStreaming?: boolean;
   timestamp: number;
@@ -57,6 +60,57 @@ export interface HITLPending {
   description?: string;
 }
 
+/** 参数 Schema 定义 - 兼容 JSON Schema 和 Airflow Params */
+export interface ParamSchema {
+  // 基础信息
+  type: string | string[];
+  title?: string;
+  description?: string;
+
+  // 默认值
+  default?: unknown;
+
+  // 约束 - 字符串
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: "date" | "date-time" | "time" | "email" | "uri" | "multiline" | string;
+
+  // 约束 - 数值
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+
+  // 约束 - 枚举/选项
+  enum?: unknown[];
+  examples?: unknown[];
+  values_display?: Record<string, string>;
+
+  // 约束 - 数组
+  items?: Record<string, unknown>;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+
+  // UI 相关
+  section?: string;
+  const?: unknown;
+  placeholder?: string;
+}
+
+/** 缺省参数待填写 - 由 MissingParamsMiddleware 触发 */
+export interface ParamsPending {
+  execution_id: string;
+  tool_name: string;
+  tool_call_id: string;
+  description?: string;
+  current_params: Record<string, unknown>;
+  missing_params: string[];
+  params_schema: Record<string, ParamSchema>;
+}
+
 /** 建议选项 - 用于快速回复 */
 export interface Suggestion {
   id: string;
@@ -87,6 +141,7 @@ export type SSEEventType =
   | "tool.call"
   | "tool.result"
   | "hitl.pending"
+  | "params.pending"
   | "todo.state"
   | "message"
   | "suggestions"
