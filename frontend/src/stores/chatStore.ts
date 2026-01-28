@@ -158,13 +158,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         case "tool.call": {
           if (last && last.role === "assistant") {
+            const execId = data.execution_id as string;
+            const existingCalls = last.toolCalls ?? [];
+            // Skip if tool call with same execution_id already exists (avoid duplicates on HITL resume)
+            if (existingCalls.some((tc) => tc.execution_id === execId)) {
+              return { messages: msgs };
+            }
             const tc: ToolCallInfo = {
               tool_name: data.tool_name as string,
               params: data.params as Record<string, unknown>,
-              execution_id: data.execution_id as string,
+              execution_id: execId,
               status: "running",
             };
-            last.toolCalls = [...(last.toolCalls ?? []), tc];
+            last.toolCalls = [...existingCalls, tc];
             msgs[lastIdx] = last;
           }
           return { messages: msgs };
