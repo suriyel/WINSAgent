@@ -1,6 +1,7 @@
 import type { Message } from "../../types";
 import ThinkingIndicator from "./ThinkingIndicator";
 import TodoStepper from "../todo/TodoStepper";
+import HITLInlineCard from "../hitl/HITLInlineCard";
 
 interface Props {
   message: Message;
@@ -65,6 +66,13 @@ export default function MessageBubble({ message }: Props) {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* HITL inline card */}
+          {message.hitlPending && (
+            <div className="mb-3">
+              <HITLInlineCard hitlPending={message.hitlPending} />
             </div>
           )}
 

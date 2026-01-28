@@ -204,14 +204,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         case "hitl.pending": {
+          const hitlData: HITLPending = {
+            execution_id: data.execution_id as string,
+            tool_name: data.tool_name as string,
+            params: data.params as Record<string, unknown>,
+            schema: data.schema as Record<string, unknown>,
+            description: data.description as string | undefined,
+          };
+          // Attach HITL info to the last assistant message for inline rendering
+          if (last && last.role === "assistant") {
+            last.hitlPending = hitlData;
+            last.isStreaming = false; // Pause streaming while waiting for HITL
+            msgs[lastIdx] = last;
+          }
           return {
-            pendingHITL: {
-              execution_id: data.execution_id as string,
-              tool_name: data.tool_name as string,
-              params: data.params as Record<string, unknown>,
-              schema: data.schema as Record<string, unknown>,
-              description: data.description as string | undefined,
-            },
+            messages: msgs,
+            pendingHITL: hitlData,
+            isStreaming: false, // Pause streaming while waiting for HITL decision
           };
         }
 
@@ -237,8 +246,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const convId = get().activeConversationId;
     if (!convId) return;
 
-    // Clear pending HITL and set streaming state
-    set({ pendingHITL: null, isStreaming: true });
+    // Clear pending HITL from both global state and the message
+    set((state) => {
+      const msgs = [...state.messages];
+      const lastIdx = msgs.length - 1;
+      if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+        msgs[lastIdx] = { ...msgs[lastIdx], hitlPending: undefined, isStreaming: true };
+      }
+      return { messages: msgs, pendingHITL: null, isStreaming: true };
+    });
 
     const controller = submitHITLDecision(
       convId,

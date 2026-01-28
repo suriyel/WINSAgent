@@ -23,6 +23,7 @@ export interface Message {
   content: string;
   toolCalls?: ToolCallInfo[];
   todoSteps?: TodoStep[];
+  hitlPending?: HITLPending;
   isStreaming?: boolean;
   timestamp: number;
 }
