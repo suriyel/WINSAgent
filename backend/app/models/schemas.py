@@ -32,6 +32,11 @@ class HITLAction(str, Enum):
     reject = "reject"
 
 
+class ParamsAction(str, Enum):
+    submit = "submit"
+    cancel = "cancel"
+
+
 class ToolCategory(str, Enum):
     query = "query"
     mutation = "mutation"
@@ -52,6 +57,12 @@ class HITLDecision(BaseModel):
     action: HITLAction
     tool_name: str
     edited_params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ParamsDecision(BaseModel):
+    action: ParamsAction
+    tool_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RebuildKnowledgeRequest(BaseModel):

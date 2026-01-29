@@ -2,6 +2,7 @@ import type { Message } from "../../types";
 import ThinkingIndicator from "./ThinkingIndicator";
 import TodoStepper from "../todo/TodoStepper";
 import HITLInlineCard from "../hitl/HITLInlineCard";
+import ParamsInlineCard from "../hitl/ParamsInlineCard";
 import SuggestionChips from "./SuggestionChips";
 
 interface Props {
@@ -74,6 +75,13 @@ export default function MessageBubble({ message }: Props) {
           {message.hitlPending && (
             <div className="mb-3">
               <HITLInlineCard hitlPending={message.hitlPending} />
+            </div>
+          )}
+
+          {/* Missing params inline card */}
+          {message.paramsPending && (
+            <div className="mb-3">
+              <ParamsInlineCard paramsPending={message.paramsPending} />
             </div>
           )}
 

@@ -40,12 +40,14 @@ app.add_middleware(
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.hitl import router as hitl_router
+from app.api.params import router as params_router
 from app.api.knowledge_api import router as knowledge_router
 from app.api.tasks import router as tasks_router
 from app.api.tools_api import router as tools_router
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(hitl_router, prefix="/api")
+app.include_router(params_router, prefix="/api")
 app.include_router(conversations_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")

@@ -15,7 +15,7 @@ import type {
   ToolCallInfo,
 } from "../types";
 import { connectSSE } from "../services/sse";
-import { submitHITLDecision } from "../services/api";
+import { submitHITLDecision, submitParamsDecision } from "../services/api";
 
 interface ChatState {
   // Conversations
@@ -346,11 +346,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: msgs, pendingParams: null, isStreaming: true };
     });
 
-    // Submit params decision to backend (reuses HITL endpoint with different action)
-    const controller = submitHITLDecision(
+    // Submit params decision to dedicated params endpoint
+    const controller = submitParamsDecision(
       convId,
       pending.tool_name,
-      action === "submit" ? "approve" : "reject",  // Map params action to HITL action
+      action,
       editedParams ?? {},
       (eventType, data) => get().handleSSEEvent(eventType, data),
       () => {

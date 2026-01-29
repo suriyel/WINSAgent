@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from langchain.tools import tool
 
+from app.agent.middleware.missing_params import array_param, param_edit, string_param
 from app.agent.tools.registry import tool_registry
 
 
@@ -59,6 +60,31 @@ def validate_customer(customer_id: str) -> str:
 # Tool 3: create_order (变更类，需HITL确认)
 # ---------------------------------------------------------------------------
 
+@param_edit({
+    "customer_id": string_param(
+        title="客户编码",
+        description="客户编码（如 C001），可通过 search_customer 查询",
+        placeholder="例如: C001",
+    ),
+    "product_codes": array_param(
+        item_type="string",
+        title="产品编码列表",
+        description="产品编码列表，需符合ERP编码规范",
+        placeholder='例如: ["P001", "P002"]',
+    ),
+    "quantities": array_param(
+        item_type="integer",
+        title="数量列表",
+        description="对应产品的数量列表，与产品编码一一对应",
+        placeholder="例如: [10, 20]",
+        min_items=1,
+    ),
+    "delivery_address": string_param(
+        title="配送地址",
+        description="配送地址，需包含省市区",
+        placeholder="例如: 上海市浦东新区张江高科技园区",
+    ),
+})
 @tool
 def create_order(
     customer_id: str,
@@ -113,7 +139,5 @@ def register_demo_tools() -> None:
     """Register all demo tools into the global registry."""
     tool_registry.register(search_customer, category="query")
     tool_registry.register(validate_customer, category="query")
-    tool_registry.register(
-        create_order, category="mutation", requires_hitl=True
-    )
+    tool_registry.register(create_order, category="mutation", requires_hitl=True)
     tool_registry.register(check_inventory, category="query")

@@ -328,6 +328,32 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState]):
 # ---------------------------------------------------------------------------
 
 
+def param_edit(schema: dict[str, ParamSchema]):
+    """Decorator: attach param_edit_schema directly on a @tool instance.
+
+    Usage::
+
+        @param_edit({
+            "customer_id": string_param(title="客户编码"),
+            "address": string_param(title="配送地址"),
+        })
+        @tool
+        def create_order(customer_id: str, address: str) -> str:
+            ...
+
+    Note: ``@param_edit`` must be placed **above** ``@tool`` so that it
+    receives the already-constructed ``BaseTool`` object.  The registry
+    will auto-detect the ``_param_edit_schema`` attribute during
+    ``register()`` — no need to pass ``param_edit_schema=`` explicitly.
+    """
+
+    def decorator(tool_obj):
+        tool_obj._param_edit_schema = schema
+        return tool_obj
+
+    return decorator
+
+
 def string_param(
     title: str | None = None,
     description: str | None = None,
@@ -475,6 +501,7 @@ def array_param(
     required: bool = True,
     min_items: int | None = None,
     max_items: int | None = None,
+    placeholder: str | None = None,
 ) -> ParamSchema:
     """创建数组类型参数 schema."""
     return ParamSchema(
@@ -485,6 +512,7 @@ def array_param(
         items={"type": item_type},
         minItems=min_items,
         maxItems=max_items,
+        placeholder=placeholder,
     )
 
 

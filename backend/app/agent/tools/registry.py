@@ -49,8 +49,10 @@ class ToolRegistry:
         self._categories.setdefault(category, []).append(name)
         if requires_hitl:
             self._hitl_required.add(name)
-        if param_edit_schema:
-            self._param_edit_schemas[name] = param_edit_schema
+        # Auto-detect from @param_edit decorator if not passed explicitly
+        schema = param_edit_schema or getattr(tool, "_param_edit_schema", None)
+        if schema:
+            self._param_edit_schemas[name] = schema
 
     # ---- queries ----
 
