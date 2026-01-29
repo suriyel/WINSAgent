@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WINS Agent Workstation is a full-stack AI Agent application that integrates with legacy business systems. It enables intelligent task orchestration through natural language with built-in human-in-the-loop (HITL) approval, TODO tracking, and domain knowledge retrieval.
+WINS Agent Workstation is a full-stack AI Agent application for telecom network optimization simulation. It enables intelligent analysis of network coverage, interference, and capacity issues through digital twin scenarios, with root cause analysis and optimization simulation comparison.
 
 **Tech Stack:**
 - Backend: FastAPI + LangChain 1.2.5 + FAISS (Python)
@@ -50,13 +50,12 @@ Tools are registered in `app/agent/tools/registry.py` with metadata:
 - `requires_hitl`: Boolean - if true, tool execution pauses for user approval
 - `category`: "query" (no HITL) or "mutation" (typically requires HITL)
 
-Query tools: `search_customer`, `validate_customer`, `check_inventory`, `search_terminology`, `search_design_doc`
-Mutation tools: `create_order` (requires HITL)
+Query tools: `match_scenario`, `query_root_cause_analysis`, `query_simulation_results`, `search_terminology`, `search_design_doc`
 
 ### Knowledge System
 Dual FAISS vector stores in `app/knowledge/vector_store.py`:
-- `terminology/` - Professional terminology
-- `design_docs/` - System design documentation
+- `terminology/` - Telecom network optimization terminology
+- `design_docs/` - Cell-level and grid-level analysis workflow documents
 
 Indexes are persisted to `backend/faiss_indexes/` and rebuilt via `/api/knowledge/rebuild`.
 
@@ -82,6 +81,7 @@ Zustand store in `stores/chatStore.ts` manages:
 |------|---------|
 | `backend/app/agent/core.py` | Agent builder with system prompt, middleware, and singleton |
 | `backend/app/agent/tools/registry.py` | Central tool registry with metadata |
+| `backend/app/agent/tools/telecom_tools.py` | Telecom network optimization tools |
 | `backend/app/agent/tools/hil.py` | Custom HITL middleware implementation |
 | `backend/app/sse/event_mapper.py` | Converts LangChain output to SSE frames |
 | `backend/app/knowledge/vector_store.py` | FAISS manager (dual-store) |

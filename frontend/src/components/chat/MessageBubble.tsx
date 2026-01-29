@@ -9,6 +9,115 @@ interface Props {
   message: Message;
 }
 
+/** Max number of data rows to display in a table (excluding the header). */
+const TABLE_MAX_ROWS = 10;
+
+/**
+ * Parse a tool result string and render [DATA_TABLE] blocks as HTML tables.
+ * Non-table text is rendered as plain preformatted text.
+ */
+function renderToolResult(result: string) {
+  const parts: { type: "text" | "table"; content: string }[] = [];
+  let remaining = result;
+
+  while (remaining.length > 0) {
+    const startTag = "[DATA_TABLE]";
+    const endTag = "[/DATA_TABLE]";
+    const startIdx = remaining.indexOf(startTag);
+
+    if (startIdx === -1) {
+      // No more tables
+      parts.push({ type: "text", content: remaining });
+      break;
+    }
+
+    // Text before the table
+    if (startIdx > 0) {
+      parts.push({ type: "text", content: remaining.slice(0, startIdx) });
+    }
+
+    const endIdx = remaining.indexOf(endTag, startIdx);
+    if (endIdx === -1) {
+      // Malformed — treat remaining as text
+      parts.push({ type: "text", content: remaining.slice(startIdx) });
+      break;
+    }
+
+    const tableContent = remaining.slice(startIdx + startTag.length, endIdx).trim();
+    parts.push({ type: "table", content: tableContent });
+    remaining = remaining.slice(endIdx + endTag.length);
+  }
+
+  return (
+    <div className="mt-1 space-y-2">
+      {parts.map((part, idx) => {
+        if (part.type === "text") {
+          const trimmed = part.content.trim();
+          if (!trimmed) return null;
+          return (
+            <pre key={idx} className="text-xs text-text-secondary whitespace-pre-wrap">
+              {trimmed}
+            </pre>
+          );
+        }
+
+        // Parse CSV table
+        const lines = part.content.split("\n").filter((l) => l.trim() !== "");
+        if (lines.length === 0) return null;
+
+        const headers = lines[0].split(",");
+        const dataRows = lines.slice(1, TABLE_MAX_ROWS + 1);
+        const totalRows = lines.length - 1;
+        const truncated = totalRows > TABLE_MAX_ROWS;
+
+        return (
+          <div key={idx} className="overflow-x-auto">
+            <table className="min-w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-primary/10">
+                  {headers.map((h, hi) => (
+                    <th
+                      key={hi}
+                      className="px-2 py-1.5 text-left font-semibold text-text-primary border border-gray-200 whitespace-nowrap"
+                    >
+                      {h.trim()}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dataRows.map((row, ri) => {
+                  const cells = row.split(",");
+                  return (
+                    <tr
+                      key={ri}
+                      className={ri % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                    >
+                      {cells.map((cell, ci) => (
+                        <td
+                          key={ci}
+                          className="px-2 py-1 text-text-secondary border border-gray-200 whitespace-nowrap"
+                        >
+                          {cell.trim()}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {truncated && (
+              <p className="text-xs text-text-weak mt-1">
+                &#x2026; 共 {totalRows} 条记录，仅展示前 {TABLE_MAX_ROWS} 条
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function MessageBubble({ message }: Props) {
   const isUser = message.role === "user";
 
@@ -61,11 +170,7 @@ export default function MessageBubble({ message }: Props) {
                         : "待执行"}
                     </span>
                   </div>
-                  {tc.result && (
-                    <pre className="text-xs text-text-secondary whitespace-pre-wrap mt-1">
-                      {tc.result}
-                    </pre>
-                  )}
+                  {tc.result && renderToolResult(tc.result)}
                 </div>
               ))}
             </div>
