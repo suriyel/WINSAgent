@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+import uuid
 from typing import Any, Literal
 
 from langchain.agents import AgentState
@@ -162,6 +165,136 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState]):
         self._tools_schema = tools_with_param_edit or {}
         self._check_all = check_all_tools
         self._description_prefix = description_prefix
+
+    # ------------------------------------------------------------------
+    # after_model: 解析 LLM 输出的 ```params_request``` 结构化格式
+    # ------------------------------------------------------------------
+
+    def after_model(self, state: MissingParamsState) -> dict[str, Any] | None:
+        """解析 LLM 输出中的 params_request 块并触发参数填写表单.
+
+        当 LLM 输出 ```params_request { "tool_name": ..., "known_params": {...},
+        "missing_params": [...] }``` 时，此方法会：
+        1. 解析结构化数据
+        2. 触发 interrupt 让前端展示参数表单
+        3. 用户提交后构造合成 tool_call，驱动 Agent 进入工具执行
+        """
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        last_message = messages[-1]
+        if not isinstance(last_message, AIMessage):
+            return None
+
+        # 如果已有 tool_calls，跳过（让 before_tool 处理）
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return None
+
+        content = last_message.content
+        if not content or not isinstance(content, str):
+            return None
+
+        # 解析 ```params_request {...}```
+        cleaned_content, params_request = self._parse_params_request(content)
+        if not params_request:
+            return None
+
+        tool_name = params_request.get("tool_name", "")
+        known_params = params_request.get("known_params", {})
+        missing_param_names = params_request.get("missing_params", [])
+
+        # 查找参数 schema
+        params_schema = self._get_params_schema(tool_name, state)
+        if not params_schema:
+            logger.warning(
+                f"MissingParamsMiddleware: 工具 {tool_name} 未注册 param_edit_schema，忽略"
+            )
+            return None
+
+        # 过滤出在 schema 中存在的缺失参数
+        missing = [p for p in missing_param_names if p in params_schema]
+        if not missing:
+            return None
+
+        tool_call_id = str(uuid.uuid4())
+
+        info = MissingParamsInfo(
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            description=f"{self._description_prefix}: {tool_name}",
+            current_params=known_params,
+            missing_params=missing,
+            params_schema=params_schema,
+        )
+
+        logger.info(
+            f"MissingParamsMiddleware(after_model): "
+            f"解析到 params_request，工具={tool_name}，缺少参数={missing}"
+        )
+
+        # 触发 interrupt → 前端展示表单
+        result = interrupt({"type": "params_edit", "info": info.model_dump()})
+
+        action = result.get("action", "cancel")
+        if action == "submit":
+            edited_params = result.get("params", {})
+            merged_args = {**known_params, **edited_params}
+
+            # 构造合成 tool_call，替换原始文本消息
+            return {
+                "messages": [
+                    AIMessage(
+                        content=cleaned_content or "",
+                        id=last_message.id,
+                        response_metadata=getattr(
+                            last_message, "response_metadata", {}
+                        ),
+                        tool_calls=[
+                            {
+                                "name": tool_name,
+                                "args": merged_args,
+                                "id": tool_call_id,
+                            }
+                        ],
+                    )
+                ]
+            }
+        else:
+            # 用户取消 → 清理消息，不调用工具
+            logger.info("MissingParamsMiddleware(after_model): 用户取消了参数填写")
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(cleaned_content or "") + "\n\n操作已取消。",
+                        id=last_message.id,
+                        response_metadata=getattr(
+                            last_message, "response_metadata", {}
+                        ),
+                    )
+                ]
+            }
+
+    def _parse_params_request(
+        self, content: str
+    ) -> tuple[str, dict[str, Any] | None]:
+        """从消息内容中解析 ```params_request {...}``` 块."""
+        pattern = r"```params_request\s*(\{[\s\S]*?\})\s*```"
+        match = re.search(pattern, content, re.IGNORECASE)
+        if not match:
+            return content, None
+
+        try:
+            data = json.loads(match.group(1))
+            cleaned = re.sub(pattern, "", content, flags=re.IGNORECASE).strip()
+            return cleaned, data
+        except json.JSONDecodeError:
+            logger.warning("MissingParamsMiddleware: params_request JSON 解析失败")
+            return content, None
+
+    # ------------------------------------------------------------------
+    # before_tool: 拦截空值参数（安全兜底）
+    # ------------------------------------------------------------------
 
     def before_tool(
         self,
