@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """\
 5. **任务规划**：使用 write_todos 工具记录任务步骤计划，便于用户跟踪进度。
 
 6. **缺省参数处理**：当你准备调用工具但发现某些必填参数无法通过上下文或查询工具获得时：
-   - 先尝试使用相关查询工具（如 search_customer、check_inventory）获取参数值
+   - 务必先尝试使用查询工具（如 search_customer、check_inventory）获取参数值
    - 查询后仍无法确定的参数，**必须**使用以下格式输出参数请求，系统会自动弹出表单让用户填写：
 ```params_request
 {
