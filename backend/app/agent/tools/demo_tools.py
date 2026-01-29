@@ -15,7 +15,13 @@ from app.agent.tools.registry import tool_registry
 # ---------------------------------------------------------------------------
 # Tool 1: search_customer (查询类，无HITL)
 # ---------------------------------------------------------------------------
-
+@param_edit({
+    "keyword": string_param(
+        title="客户名称或编码的模糊搜索关键词",
+        description="根据关键词搜索客户信息。返回匹配的客户编码和名称列表。",
+        placeholder="例如: 华东或C001",
+    )}
+)
 @tool
 def search_customer(keyword: str) -> str:
     """根据关键词搜索客户信息。返回匹配的客户编码和名称列表。
@@ -35,7 +41,15 @@ def search_customer(keyword: str) -> str:
 # ---------------------------------------------------------------------------
 # Tool 2: validate_customer (查询类，无HITL)
 # ---------------------------------------------------------------------------
-
+@param_edit({
+    "customer_id": string_param(
+        title="客户编码（如 C001）",
+        description="""
+        验证客户编码的有效性并返回客户详细信息。
+        依赖关系：可通过 search_customer 工具先查询获取客户编码。""",
+        placeholder="例如: 客户编码（如 C001）",
+    )}
+)
 @tool
 def validate_customer(customer_id: str) -> str:
     """验证客户编码的有效性并返回客户详细信息。
