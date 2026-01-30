@@ -171,15 +171,7 @@ class SubAgentMiddleware(AgentMiddleware[SubAgentState, ContextT]):
 
         @tool
         def task(agent_name: str, task_description: str) -> str:
-            f"""将任务委派给专业子Agent执行。子Agent拥有独立上下文，不会污染当前对话。
-
-可用的子Agent:
-{agent_list}
-
-参数说明：
-- agent_name: 子Agent名称
-- task_description: 详细的任务描述，包含所有必要上下文
-"""
+            """将任务委派给专业子Agent执行。子Agent拥有独立上下文，不会污染当前对话。"""
             if agent_name not in delegated_map:
                 available = ", ".join(delegated_map.keys())
                 return f"未知的子Agent '{agent_name}'。可用: {available}"
@@ -187,7 +179,7 @@ class SubAgentMiddleware(AgentMiddleware[SubAgentState, ContextT]):
             compiled = delegated_map[agent_name]
             return runner.invoke_delegated(compiled, task_description)
 
-        # 动态更新 description（因为 f-string in docstring 不生效）
+        # 动态更新 description，包含可用子 Agent 列表
         task.description = (
             "将任务委派给专业子Agent执行。子Agent拥有独立上下文，不会污染当前对话。\n\n"
             f"可用的子Agent:\n{agent_list}\n\n"
