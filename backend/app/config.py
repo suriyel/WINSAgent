@@ -12,10 +12,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
 
 class Settings(BaseSettings):
-    # LLM
+    # LLM (main agent)
     llm_model: str = "openai:gpt-4o"
     llm_api_key: str = ""
     llm_base_url: str = ""
+
+    # LLM (todo sub-agent — lightweight model for task progress tracking)
+    todo_agent_model: str = ""
 
     # Paths
     knowledge_dir: str = str(Path(__file__).resolve().parent.parent.parent / "knowledge")

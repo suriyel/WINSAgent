@@ -6,7 +6,7 @@ import logging
 
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
-from langchain.agents.middleware.todo import TodoListMiddleware
+from app.agent.middleware.todo_subagent import TodoSubAgentMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.middleware.missing_params import MissingParamsMiddleware
@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """\
    - 用户问"弱覆盖" → 查询 RSRP、MR覆盖率、覆盖电平等相关指标
    - 用户问"干扰" → 查询 SINR、RSRQ、重叠覆盖度等相关指标
    - 用户问"容量" → 查询 PRB利用率、下行流量、用户数等相关指标
-5. **任务规划**：使用 write_todos 工具记录任务步骤计划，便于用户跟踪进度。
+5. **专注执行**：系统会自动跟踪你的任务执行进度，你只需专注于按流程调用工具。
 
 ## 根因分析后的固定提示（必须遵守）
 
@@ -133,7 +133,7 @@ def build_agent():
     param_edit_config = tool_registry.get_param_edit_config()
 
     middleware = [
-        TodoListMiddleware(),
+        TodoSubAgentMiddleware(),
         SuggestionsMiddleware(),
     ]
 
