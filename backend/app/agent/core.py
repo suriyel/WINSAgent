@@ -6,11 +6,12 @@ import logging
 
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
-from langchain.agents.middleware.todo import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.middleware.missing_params import MissingParamsMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
+from app.agent.subagents import SubAgentMiddleware
+from app.agent.subagents.agents.todo_tracker import TODO_TRACKER_CONFIG
 from app.agent.tools.telecom_tools import register_telecom_tools
 from app.agent.tools.hil import CustomHumanInTheLoopMiddleware
 from app.agent.tools.knowledge import register_knowledge_tools
@@ -34,7 +35,6 @@ SYSTEM_PROMPT = """\
    - 用户问"弱覆盖" → 查询 RSRP、MR覆盖率、覆盖电平等相关指标
    - 用户问"干扰" → 查询 SINR、RSRQ、重叠覆盖度等相关指标
    - 用户问"容量" → 查询 PRB利用率、下行流量、用户数等相关指标
-5. **任务规划**：使用 write_todos 工具记录任务步骤计划，便于用户跟踪进度。
 
 ## 根因分析后的固定提示（必须遵守）
 
@@ -132,8 +132,16 @@ def build_agent():
     hitl_config = tool_registry.get_hitl_config()
     param_edit_config = tool_registry.get_param_edit_config()
 
+    # SubAgent Middleware（替代 TodoListMiddleware）
+    subagent_mw = SubAgentMiddleware(
+        delegated=[],
+        reactive=[TODO_TRACKER_CONFIG],
+    )
+    # 注入 task() tool（如有委派式子 Agent）
+    all_tools.extend(subagent_mw.tools)
+
     middleware = [
-        TodoListMiddleware(),
+        subagent_mw,
         SuggestionsMiddleware(),
     ]
 
@@ -158,8 +166,8 @@ def build_agent():
     # 1. 配置通义千问的 OpenAI 兼容实例
     llm = ChatOpenAI(
         model=settings.llm_model,  # 例如 "qwen-max"
-        openai_api_key=settings.llm_api_key,
-        openai_api_base=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
         streaming=True
     )
 

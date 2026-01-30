@@ -262,7 +262,7 @@ def match_scenario(description: str) -> str:
             matched.append(s)
 
     if not matched:
-        return f"未找到与"{description}"匹配的场景。请检查区域名称或问题描述。"
+        return f"未找到与{description}匹配的场景。请检查区域名称或问题描述。"
 
     result_lines = [f"找到 {len(matched)} 个匹配场景：\n"]
     for s in matched:

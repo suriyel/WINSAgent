@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = ""
 
+    # SubAgent
+    subagent_model: str = ""  # 子 Agent 模型标识符，空则复用 llm_model
+
     # Paths
     knowledge_dir: str = str(Path(__file__).resolve().parent.parent.parent / "knowledge")
     faiss_index_dir: str = str(Path(__file__).resolve().parent.parent / "faiss_indexes")

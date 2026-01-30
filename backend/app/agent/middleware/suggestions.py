@@ -9,6 +9,8 @@ from typing import Any
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage
+from langgraph.runtime import Runtime
+from langgraph.typing import ContextT
 from pydantic import BaseModel
 
 
@@ -34,7 +36,7 @@ class SuggestionsState(AgentState):
     suggestions: SuggestionsData | None
 
 
-class SuggestionsMiddleware(AgentMiddleware[SuggestionsState]):
+class SuggestionsMiddleware(AgentMiddleware[SuggestionsState, ContextT]):
     """从 LLM 响应中解析建议选项的 Middleware.
 
     支持两种格式：
@@ -48,7 +50,7 @@ class SuggestionsMiddleware(AgentMiddleware[SuggestionsState]):
     name: str = "suggestions"
     state_schema = SuggestionsState
 
-    def after_model(self, state: SuggestionsState) -> dict[str, Any] | None:
+    def after_model(self, state: SuggestionsState, runtime: Runtime[ContextT]) -> dict[str, Any] | None:
         """在模型响应后解析并提取建议选项."""
         messages = state.get("messages", [])
         if not messages:

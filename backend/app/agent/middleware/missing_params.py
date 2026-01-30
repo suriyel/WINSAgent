@@ -10,12 +10,14 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, Literal
+from typing import Any
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage
+from langgraph.runtime import Runtime
 from langgraph.types import interrupt
+from langgraph.typing import ContextT
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -129,7 +131,7 @@ class MissingParamsState(AgentState):
 # ---------------------------------------------------------------------------
 
 
-class MissingParamsMiddleware(AgentMiddleware[MissingParamsState]):
+class MissingParamsMiddleware(AgentMiddleware[MissingParamsState, ContextT]):
     """检测工具调用中的缺省参数并触发 interrupt.
 
     当工具被调用但存在缺省/空值参数时，此 middleware 会：
@@ -170,7 +172,7 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState]):
     # after_model: 解析 LLM 输出的 ```params_request``` 结构化格式
     # ------------------------------------------------------------------
 
-    def after_model(self, state: MissingParamsState) -> dict[str, Any] | None:
+    def after_model(self, state: MissingParamsState, runtime: Runtime[ContextT]) -> dict[str, Any] | None:
         """解析 LLM 输出中的 params_request 块并触发参数填写表单.
 
         当 LLM 输出 ```params_request { "tool_name": ..., "known_params": {...},
