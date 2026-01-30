@@ -1,6 +1,7 @@
 """Shared fixtures for SubAgent framework tests.
 
-All tests use mocked LLM to avoid real API calls.
+- Unit tests (default): use mocked LLM, no real API calls.
+- Live tests (pytest.mark.live): use real .env settings and LLM API.
 """
 
 from __future__ import annotations
@@ -14,7 +15,10 @@ import pytest
 # Ensure backend/app is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Patch settings before any app module imports to avoid .env loading issues
+# ---------------------------------------------------------------------------
+# Mock settings for unit tests
+# ---------------------------------------------------------------------------
+
 _mock_settings = MagicMock()
 _mock_settings.llm_model = "test-model"
 _mock_settings.llm_api_key = "sk-test-key"
@@ -23,13 +27,55 @@ _mock_settings.subagent_model = ""
 
 
 @pytest.fixture(autouse=True)
-def patch_settings():
-    """Patch settings globally for all tests."""
+def patch_settings(request):
+    """Patch settings globally for unit tests; skip for live tests."""
+    if request.node.get_closest_marker("live"):
+        # Live tests use real settings from .env
+        yield None
+        return
+
     with patch("app.config.settings", _mock_settings):
-        # Also patch in runner module where settings is imported directly
         with patch("app.agent.subagents.runner.settings", _mock_settings):
             yield _mock_settings
 
+
+# ---------------------------------------------------------------------------
+# Live test helpers
+# ---------------------------------------------------------------------------
+
+def _load_real_settings():
+    """Load real settings from .env (for live tests)."""
+    from app.config import Settings
+    return Settings()
+
+
+@pytest.fixture
+def real_settings():
+    """Provide real settings loaded from .env."""
+    return _load_real_settings()
+
+
+@pytest.fixture
+def real_llm():
+    """Create a real ChatOpenAI instance from .env config."""
+    from langchain_openai import ChatOpenAI
+    s = _load_real_settings()
+    return ChatOpenAI(
+        model=s.subagent_model or s.llm_model,
+        api_key=s.llm_api_key,
+        base_url=s.llm_base_url,
+        streaming=False,
+    )
+
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "live: tests that call real LLM API (require .env)")
+
+
+# ---------------------------------------------------------------------------
+# Unit test fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mock_llm():
