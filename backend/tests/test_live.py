@@ -27,7 +27,7 @@ from app.agent.subagents.agents.todo_tracker import (
     should_fire,
 )
 from app.agent.subagents.runner import SubAgentRunner
-from app.agent.subagents.types import CompiledSubAgent, ReactiveSubAgentConfig
+from app.agent.subagents.types import CompiledSubAgent, ReactiveSubAgentConfig, SubAgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -709,3 +709,478 @@ def _safe_parse_summary(raw: str):
     except (json.JSONDecodeError, TypeError):
         pass
     return None
+
+
+# ===========================================================================
+# Example 9: task() tool — 委派式子 Agent 真实 LLM 调用
+# ===========================================================================
+
+def _make_echo_tool():
+    """创建一个简单的 echo tool 供 delegated 子 Agent 使用."""
+    from langchain.tools import tool as lc_tool
+
+    @lc_tool
+    def echo_data(text: str) -> str:
+        """将输入文本原样返回，用于测试工具调用链路。"""
+        return f"Echo: {text}"
+
+    return echo_data
+
+
+def _make_calc_tool():
+    """创建一个简单的计算 tool."""
+    from langchain.tools import tool as lc_tool
+
+    @lc_tool
+    def calculate(expression: str) -> str:
+        """计算数学表达式并返回结果。仅支持基本四则运算。"""
+        try:
+            result = eval(expression, {"__builtins__": {}}, {})
+            return f"计算结果: {expression} = {result}"
+        except Exception as e:
+            return f"计算失败: {e}"
+
+    return calculate
+
+
+def _make_kpi_lookup_tool():
+    """创建一个模拟 KPI 查询 tool."""
+    from langchain.tools import tool as lc_tool
+
+    @lc_tool
+    def lookup_kpi(kpi_name: str) -> str:
+        """查询通信网络 KPI 指标的定义和参考值范围。"""
+        kpi_db = {
+            "RSRP": {"定义": "参考信号接收功率", "单位": "dBm", "正常范围": "-100 ~ -80"},
+            "SINR": {"定义": "信号与干扰加噪声比", "单位": "dB", "正常范围": "0 ~ 20"},
+            "PRB利用率": {"定义": "物理资源块利用率", "单位": "%", "正常范围": "0 ~ 70"},
+        }
+        if kpi_name in kpi_db:
+            info = kpi_db[kpi_name]
+            return json.dumps(info, ensure_ascii=False)
+        return f"未找到 KPI: {kpi_name}。可查询: {', '.join(kpi_db.keys())}"
+
+    return lookup_kpi
+
+
+class TestTaskToolLive:
+    """task() tool — 委派式子 Agent 的真实 LLM 测试."""
+
+    # --- 9.1: task tool 创建与属性验证 ---
+
+    def test_task_tool_created_with_delegated(self):
+        """注册 delegated 子 Agent 后 mw.tools 应包含 task tool."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        delegated_config: SubAgentConfig = {
+            "name": "echo_agent",
+            "description": "回显测试子 Agent",
+            "system_prompt": "你是一个回显助手。用户给你什么内容，调用 echo_data 工具原样返回。",
+            "tools": [_make_echo_tool()],
+        }
+
+        mw = SubAgentMiddleware(delegated=[delegated_config])
+
+        assert len(mw.tools) == 1, f"应有 1 个 task tool，实际: {len(mw.tools)}"
+        task_tool = mw.tools[0]
+        assert task_tool.name == "task"
+        assert "echo_agent" in task_tool.description
+        _print_result("task tool description", task_tool.description)
+
+    def test_task_tool_description_lists_multiple_agents(self):
+        """多个 delegated 子 Agent 时 description 应列出所有."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        configs = [
+            {
+                "name": "agent_alpha",
+                "description": "Alpha 数据处理",
+                "system_prompt": "你是 Alpha",
+                "tools": [_make_echo_tool()],
+            },
+            {
+                "name": "agent_beta",
+                "description": "Beta 计算引擎",
+                "system_prompt": "你是 Beta",
+                "tools": [_make_calc_tool()],
+            },
+        ]
+
+        mw = SubAgentMiddleware(delegated=configs)
+
+        assert len(mw.tools) == 1
+        desc = mw.tools[0].description
+        assert "agent_alpha" in desc
+        assert "agent_beta" in desc
+        assert "Alpha 数据处理" in desc
+        assert "Beta 计算引擎" in desc
+        _print_result("多 Agent task tool description", desc)
+
+    # --- 9.2: task tool 路由 — 未知 agent_name ---
+
+    def test_task_tool_unknown_agent_name(self):
+        """传入不存在的 agent_name 应返回错误提示."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(delegated=[{
+            "name": "real_agent",
+            "description": "真实子 Agent",
+            "system_prompt": "你是助手",
+            "tools": [_make_echo_tool()],
+        }])
+
+        task_tool = mw.tools[0]
+        result = task_tool.invoke({
+            "agent_name": "ghost_agent",
+            "task_description": "这个 agent 不存在",
+        })
+
+        _print_result("未知 agent_name 结果", result)
+        assert "未知" in result
+        assert "real_agent" in result  # 应提示可用名称
+
+    # --- 9.3: task tool 委派调用 — echo 子 Agent ---
+
+    def test_task_tool_invokes_echo_agent(self):
+        """通过 task tool 调用 echo 子 Agent，验证真实 LLM 工具调用链路."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(delegated=[{
+            "name": "echo_agent",
+            "description": "回显测试子 Agent，调用 echo_data 工具并返回结果",
+            "system_prompt": (
+                "你是一个回显助手。当用户给你任务描述时，"
+                "调用 echo_data 工具将任务描述原样传入，然后返回工具的结果。"
+                "不要添加额外内容。"
+            ),
+            "tools": [_make_echo_tool()],
+        }])
+
+        task_tool = mw.tools[0]
+        result = task_tool.invoke({
+            "agent_name": "echo_agent",
+            "task_description": "Hello from delegated task!",
+        })
+
+        _print_result("echo 子 Agent 返回", result)
+        assert isinstance(result, str)
+        assert len(result) > 0
+        # LLM 应该调用了 echo_data tool 并返回包含 Echo 的结果
+        # 但 LLM 行为不完全可控，至少验证未崩溃且有输出
+        assert "出错" not in result, f"子 Agent 执行不应出错: {result}"
+
+    # --- 9.4: task tool 委派调用 — 计算子 Agent ---
+
+    def test_task_tool_invokes_calc_agent(self):
+        """通过 task tool 调用计算子 Agent，验证工具调用 + 结果返回."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(delegated=[{
+            "name": "calc_agent",
+            "description": "数学计算子 Agent，支持基本四则运算",
+            "system_prompt": (
+                "你是一个计算助手。用户给你数学问题时，"
+                "使用 calculate 工具进行计算，然后返回计算结果。"
+                "直接返回结果，不要添加多余解释。"
+            ),
+            "tools": [_make_calc_tool()],
+        }])
+
+        task_tool = mw.tools[0]
+        result = task_tool.invoke({
+            "agent_name": "calc_agent",
+            "task_description": "请计算 123 + 456 的结果",
+        })
+
+        _print_result("计算子 Agent 返回", result)
+        assert isinstance(result, str)
+        assert len(result) > 0
+        assert "出错" not in result
+
+    # --- 9.5: task tool 委派调用 — KPI 查询子 Agent ---
+
+    def test_task_tool_invokes_kpi_agent(self):
+        """通过 task tool 调用 KPI 查询子 Agent，模拟领域场景."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(delegated=[{
+            "name": "kpi_agent",
+            "description": "通信网络 KPI 指标查询子 Agent",
+            "system_prompt": (
+                "你是通信网络 KPI 指标查询助手。"
+                "当用户询问某个 KPI 指标时，使用 lookup_kpi 工具查询定义和参考值，"
+                "然后用简洁中文返回查询结果。"
+            ),
+            "tools": [_make_kpi_lookup_tool()],
+        }])
+
+        task_tool = mw.tools[0]
+        result = task_tool.invoke({
+            "agent_name": "kpi_agent",
+            "task_description": "请查询 RSRP 指标的定义和正常范围",
+        })
+
+        _print_result("KPI 查询子 Agent 返回", result)
+        assert isinstance(result, str)
+        assert len(result) > 0
+        assert "出错" not in result
+        # LLM 应返回包含 RSRP 相关信息的回复
+        assert "RSRP" in result or "参考信号" in result or "dBm" in result, (
+            f"回复应包含 RSRP 相关内容: {result}"
+        )
+
+    # --- 9.6: task tool 多 delegated 路由 ---
+
+    def test_task_tool_routes_to_correct_agent(self):
+        """多个 delegated 子 Agent 时应路由到正确的 agent."""
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(delegated=[
+            {
+                "name": "calc_agent",
+                "description": "数学计算",
+                "system_prompt": "你是计算助手。使用 calculate 工具计算，直接返回结果。",
+                "tools": [_make_calc_tool()],
+            },
+            {
+                "name": "kpi_agent",
+                "description": "KPI 查询",
+                "system_prompt": "你是 KPI 查询助手。使用 lookup_kpi 工具查询并返回。",
+                "tools": [_make_kpi_lookup_tool()],
+            },
+        ])
+
+        task_tool = mw.tools[0]
+
+        # 路由到 calc_agent
+        calc_result = task_tool.invoke({
+            "agent_name": "calc_agent",
+            "task_description": "计算 100 * 3",
+        })
+        _print_result("路由 calc_agent", calc_result)
+        assert isinstance(calc_result, str)
+        assert "出错" not in calc_result
+
+        # 路由到 kpi_agent
+        kpi_result = task_tool.invoke({
+            "agent_name": "kpi_agent",
+            "task_description": "查询 SINR 指标",
+        })
+        _print_result("路由 kpi_agent", kpi_result)
+        assert isinstance(kpi_result, str)
+        assert "出错" not in kpi_result
+
+    # --- 9.7: task tool 状态隔离验证 ---
+
+    def test_task_tool_state_isolation(self):
+        """委派调用应状态隔离: 子 Agent 只接收 task_description 作为 HumanMessage."""
+        runner = SubAgentRunner()
+
+        config: SubAgentConfig = {
+            "name": "isolation_test",
+            "description": "状态隔离测试",
+            "system_prompt": (
+                "你是测试助手。当收到消息时，"
+                "调用 echo_data 工具把收到的消息内容传入，"
+                "然后返回工具结果。"
+            ),
+            "tools": [_make_echo_tool()],
+        }
+        compiled = runner.compile(config)
+
+        # 验证编译为 Full Agent 模式
+        assert compiled.is_simple_mode is False
+        assert compiled.runnable is not None
+
+        # invoke_delegated 只传入 task_description
+        result = runner.invoke_delegated(compiled, "隔离测试: 这是唯一传入的内容")
+
+        _print_result("状态隔离结果", result)
+        assert isinstance(result, str)
+        assert len(result) > 0
+        assert "出错" not in result
+
+
+# ===========================================================================
+# Example 10: delegated + reactive 混合 — 真实 LLM
+# ===========================================================================
+
+class TestMixedDelegatedReactiveLive:
+    """委派式 + 响应式子 Agent 在真实 LLM 下共存."""
+
+    def test_mixed_mode_coexist(self):
+        """task tool 和 after_model 同时工作，互不干扰."""
+        from unittest.mock import MagicMock
+        from app.agent.subagents.middleware import SubAgentMiddleware
+
+        mw = SubAgentMiddleware(
+            delegated=[{
+                "name": "calc_agent",
+                "description": "数学计算子 Agent",
+                "system_prompt": "你是计算助手。使用 calculate 工具计算并返回结果。",
+                "tools": [_make_calc_tool()],
+            }],
+            reactive=[TODO_TRACKER_CONFIG],
+        )
+
+        # 验证 task tool 存在
+        assert len(mw.tools) == 1
+        assert mw.tools[0].name == "task"
+
+        # 1) task tool 调用
+        task_result = mw.tools[0].invoke({
+            "agent_name": "calc_agent",
+            "task_description": "计算 7 * 8",
+        })
+        _print_result("混合模式 — task tool 结果", task_result)
+        assert isinstance(task_result, str)
+        assert "出错" not in task_result
+
+        # 2) after_model 触发 reactive
+        state = {
+            "messages": [
+                HumanMessage(content="分析问题"),
+                AIMessage(content="正在分析..."),
+            ],
+            "todos": [],
+        }
+        mock_runtime = MagicMock()
+        reactive_result = mw.after_model(state, mock_runtime)
+        _print_result("混合模式 — after_model 结果", reactive_result)
+
+        assert reactive_result is not None
+        assert "todos" in reactive_result
+        _validate_todos(reactive_result["todos"])
+
+
+# ===========================================================================
+# Example 11: Runner.compile() — Full Agent 模式真实编译
+# ===========================================================================
+
+class TestRunnerCompileFullModeLive:
+    """SubAgentRunner 使用真实 LLM 编译 Full Agent 模式子 Agent."""
+
+    def test_compile_with_tools_full_mode(self):
+        """有 tools 的配置应编译为 Full Agent 模式."""
+        runner = SubAgentRunner()
+
+        config: SubAgentConfig = {
+            "name": "full_mode_test",
+            "description": "Full Agent 模式测试",
+            "system_prompt": "你是测试助手",
+            "tools": [_make_echo_tool()],
+        }
+        compiled = runner.compile(config)
+
+        assert compiled.is_simple_mode is False
+        assert compiled.runnable is not None
+        assert compiled.llm is None
+        _print_result("Full Agent 编译结果", {
+            "name": compiled.name,
+            "is_simple_mode": compiled.is_simple_mode,
+            "has_runnable": compiled.runnable is not None,
+        })
+
+    def test_compile_simple_vs_full_same_runner(self):
+        """同一 Runner 内同时编译 Simple 和 Full Agent 模式."""
+        runner = SubAgentRunner()
+
+        # Simple 模式
+        simple_compiled = runner.compile(TODO_TRACKER_CONFIG)
+        assert simple_compiled.is_simple_mode is True
+
+        # Full Agent 模式
+        full_config: SubAgentConfig = {
+            "name": "full_agent",
+            "description": "Full Agent",
+            "system_prompt": "你是助手",
+            "tools": [_make_calc_tool()],
+        }
+        full_compiled = runner.compile(full_config)
+        assert full_compiled.is_simple_mode is False
+
+        # 互不影响
+        assert simple_compiled.name != full_compiled.name
+        assert simple_compiled.llm is not None
+        assert full_compiled.runnable is not None
+        _print_result("Simple vs Full 共存", {
+            "simple": {"name": simple_compiled.name, "mode": "Simple"},
+            "full": {"name": full_compiled.name, "mode": "Full Agent"},
+        })
+
+
+# ===========================================================================
+# Example 12: Runner.invoke_delegated() — 真实 Full Agent 调用
+# ===========================================================================
+
+class TestRunnerInvokeDelegatedLive:
+    """SubAgentRunner.invoke_delegated() 使用真实 LLM + 真实 tools."""
+
+    def test_invoke_delegated_echo(self):
+        """委派调用 echo 子 Agent."""
+        runner = SubAgentRunner()
+        config: SubAgentConfig = {
+            "name": "echo_delegated",
+            "description": "回显委派测试",
+            "system_prompt": (
+                "你是回显助手。收到任务后调用 echo_data 工具传入任务内容，"
+                "然后返回工具的结果。不要添加额外内容。"
+            ),
+            "tools": [_make_echo_tool()],
+        }
+        compiled = runner.compile(config)
+
+        result = runner.invoke_delegated(compiled, "委派测试: 验证状态隔离")
+        _print_result("invoke_delegated echo 结果", result)
+
+        assert isinstance(result, str)
+        assert "出错" not in result
+        assert "未产生回复" not in result
+
+    def test_invoke_delegated_calc(self):
+        """委派调用计算子 Agent."""
+        runner = SubAgentRunner()
+        config: SubAgentConfig = {
+            "name": "calc_delegated",
+            "description": "计算委派测试",
+            "system_prompt": "你是计算助手。使用 calculate 工具计算并返回结果。",
+            "tools": [_make_calc_tool()],
+        }
+        compiled = runner.compile(config)
+
+        result = runner.invoke_delegated(compiled, "请计算 256 + 512")
+        _print_result("invoke_delegated calc 结果", result)
+
+        assert isinstance(result, str)
+        assert "出错" not in result
+
+    def test_invoke_delegated_kpi(self):
+        """委派调用 KPI 查询子 Agent."""
+        runner = SubAgentRunner()
+        config: SubAgentConfig = {
+            "name": "kpi_delegated",
+            "description": "KPI 查询委派测试",
+            "system_prompt": (
+                "你是 KPI 查询助手。使用 lookup_kpi 工具查询并用中文返回结果。"
+            ),
+            "tools": [_make_kpi_lookup_tool()],
+        }
+        compiled = runner.compile(config)
+
+        result = runner.invoke_delegated(compiled, "查询 SINR 和 RSRP 指标")
+        _print_result("invoke_delegated kpi 结果", result)
+
+        assert isinstance(result, str)
+        assert "出错" not in result
+        assert len(result) > 10  # 应有实质内容
+
+    def test_invoke_delegated_simple_mode_rejects(self):
+        """Simple 模式的子 Agent 不能委派调用."""
+        runner = SubAgentRunner()
+        compiled = runner.compile(TODO_TRACKER_CONFIG)
+
+        assert compiled.is_simple_mode is True
+        result = runner.invoke_delegated(compiled, "不应执行")
+        _print_result("Simple 模式委派拒绝", result)
+
+        assert "无法委派" in result
