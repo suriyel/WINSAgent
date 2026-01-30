@@ -14,6 +14,8 @@ from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import BaseTool
 from langchain.tools import tool
+from langgraph.runtime import Runtime
+from langgraph.typing import ContextT
 
 from app.agent.subagents.runner import SubAgentRunner
 from app.agent.subagents.types import (
@@ -43,7 +45,7 @@ class SubAgentState(AgentState):
 # SubAgentMiddleware
 # ---------------------------------------------------------------------------
 
-class SubAgentMiddleware(AgentMiddleware[SubAgentState]):
+class SubAgentMiddleware(AgentMiddleware[SubAgentState, ContextT]):
     """统一子 Agent Middleware.
 
     委派式子 Agent:
@@ -112,7 +114,7 @@ class SubAgentMiddleware(AgentMiddleware[SubAgentState]):
     # Middleware Hook: after_model
     # ------------------------------------------------------------------
 
-    def after_model(self, state: SubAgentState) -> dict[str, Any] | None:
+    def after_model(self, state: SubAgentState,runtime: Runtime[ContextT]) -> dict[str, Any] | None:
         """在主 LLM 每次输出后自动触发响应式子 Agent.
 
         遍历所有注册在 after_model hook 的 reactive 子 Agent:

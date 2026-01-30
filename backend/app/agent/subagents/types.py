@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Literal, Sequence, Union
 
 from typing_extensions import NotRequired, TypedDict
 
@@ -71,7 +71,7 @@ class SubAgentConfig(TypedDict):
     system_prompt: str
     """子 Agent 系统提示词"""
 
-    tools: Sequence[BaseTool | Callable[..., Any]]
+    tools: Sequence[Union[BaseTool, Callable[..., Any]]]
     """子 Agent 可用工具列表"""
 
     model: NotRequired[str]
@@ -102,7 +102,7 @@ class ReactiveSubAgentConfig(TypedDict):
     system_prompt: str
     """子 Agent 系统提示词"""
 
-    tools: NotRequired[Sequence[BaseTool | Callable[..., Any]]]
+    tools: NotRequired[Sequence[Union[BaseTool, Callable[..., Any]]]]
     """子 Agent 可用工具列表。为空则使用 Simple 模式（直接 LLM 调用）。"""
 
     model: NotRequired[str]

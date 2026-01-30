@@ -79,46 +79,50 @@ async def map_agent_stream_to_sse(
             # Extract messages from the event
             messages = None
             node_name = None
+            has_todo = False
             for key, val in event.items():
                 if key.startswith("__"):
+                    continue
+                if isinstance(val, dict) and "todos" in val:
+                    has_todo = True
                     continue
                 if isinstance(val, dict) and "messages" in val:
                     messages = val["messages"]
                     node_name = key
                     break
 
-            if not messages:
+            if not messages and not has_todo:
                 continue
+            if messages is not None:
+                for msg in messages:
+                    # --- AI Message (model output) ---
+                    if isinstance(msg, (AIMessage, AIMessageChunk)):
+                        # Tool calls
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                yield _sse("tool.call", {
+                                    "tool_name": tc.get("name", ""),
+                                    "params": tc.get("args", {}),
+                                    "execution_id": tc.get("id", str(uuid.uuid4())),
+                                })
+                        # Text content (thinking / final message)
+                        if msg.content:
+                            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                            if content.strip():
+                                # If there are no tool calls, this is likely a final message
+                                if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                    yield _sse("message", {"content": content})
+                                else:
+                                    yield _sse("thinking", {"token": content})
 
-            for msg in messages:
-                # --- AI Message (model output) ---
-                if isinstance(msg, (AIMessage, AIMessageChunk)):
-                    # Tool calls
-                    if hasattr(msg, "tool_calls") and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            yield _sse("tool.call", {
-                                "tool_name": tc.get("name", ""),
-                                "params": tc.get("args", {}),
-                                "execution_id": tc.get("id", str(uuid.uuid4())),
-                            })
-                    # Text content (thinking / final message)
-                    if msg.content:
-                        content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        if content.strip():
-                            # If there are no tool calls, this is likely a final message
-                            if not (hasattr(msg, "tool_calls") and msg.tool_calls):
-                                yield _sse("message", {"content": content})
-                            else:
-                                yield _sse("thinking", {"token": content})
-
-                # --- Tool Message (tool result) ---
-                elif isinstance(msg, ToolMessage):
-                    status = "failed" if getattr(msg, "status", None) == "error" else "success"
-                    yield _sse("tool.result", {
-                        "execution_id": getattr(msg, "tool_call_id", str(uuid.uuid4())),
-                        "result": msg.content if isinstance(msg.content, str) else str(msg.content),
-                        "status": status,
-                    })
+                    # --- Tool Message (tool result) ---
+                    elif isinstance(msg, ToolMessage):
+                        status = "failed" if getattr(msg, "status", None) == "error" else "success"
+                        yield _sse("tool.result", {
+                            "execution_id": getattr(msg, "tool_call_id", str(uuid.uuid4())),
+                            "result": msg.content if isinstance(msg.content, str) else str(msg.content),
+                            "status": status,
+                        })
 
             # --- Check for state updates in the event values ---
             for key, val in event.items():
