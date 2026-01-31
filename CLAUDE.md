@@ -31,6 +31,22 @@ npm run build    # Production build (tsc -b && vite build)
 npm run preview  # Preview production build
 ```
 
+### Tests
+```bash
+cd backend
+pytest tests/                          # All unit tests (mocked LLM, no API calls)
+pytest tests/test_runner.py            # Single test file
+pytest tests/test_runner.py::TestSubAgentRunner::test_compile_creates_agent  # Single test
+pytest tests/ -m live                  # Live tests only (requires .env with real LLM_API_KEY)
+pytest tests/ -m "not live"            # Unit tests only (explicit)
+```
+
+Tests use two modes controlled by the `@pytest.mark.live` marker:
+- **Unit tests** (default): Auto-mocked settings via `conftest.py` `patch_settings` fixture; no API calls needed
+- **Live tests**: Use real `.env` config to call LLM APIs; skip in CI or when no API key available
+
+No frontend tests or linters are configured.
+
 ### Development Workflow
 1. Backend runs on http://localhost:8000
 2. Frontend Vite dev server on http://localhost:3000
@@ -45,10 +61,22 @@ User Input → FastAPI /api/chat (SSE) → LangChain Agent → Middleware Stack 
 ```
 
 ### Middleware Stack (execution order in `backend/app/agent/core.py`)
-1. **TodoListMiddleware** — Tracks task steps (pending/in_progress/completed)
+1. **SubAgentMiddleware** — Manages reactive sub-agents (e.g., TODO tracker) and delegated sub-agents; replaces the original TodoListMiddleware
 2. **SuggestionsMiddleware** — Parses `suggestions` fenced blocks from LLM output into quick-reply chips
-3. **MissingParamsMiddleware** — Detects missing required tool parameters, triggers interrupt with a JSON Schema form for the user to fill
-4. **CustomHumanInTheLoopMiddleware** — Interrupts execution for tools marked `requires_hitl`
+3. **ContextEditingMiddleware** — Clears old tool call/result messages when context exceeds 2000 tokens (keeps last 1)
+4. **MissingParamsMiddleware** — Detects missing required tool parameters, triggers interrupt with a JSON Schema form for the user to fill (conditional: only added when tools have `param_edit_schema`)
+5. **CustomHumanInTheLoopMiddleware** — Interrupts execution for tools marked `requires_hitl` (conditional: only added when tools have HITL config)
+
+### SubAgent Framework (`backend/app/agent/subagents/`)
+Two patterns for orchestrating sub-agents alongside the main agent:
+
+- **Reactive sub-agents**: Triggered by hooks (e.g., `after_model`), run in the background to update state. The TODO tracker (`agents/todo_tracker.py`) is the primary example — it parses LLM output and updates `todos` state with step progress.
+- **Delegated sub-agents**: Invoked explicitly via a `task()` tool injected by the middleware. They run in isolated context and return a string result.
+
+Key components:
+- `types.py` — `SubAgentConfig` TypedDict defining config schema
+- `runner.py` — `SubAgentRunner` compiles configs into executable agents, caches LLM instances
+- `middleware.py` — `SubAgentMiddleware` hooks into agent lifecycle, routes reactive triggers and task calls
 
 ### Tool System
 Tools are registered in `backend/app/agent/tools/registry.py` with metadata:
@@ -105,10 +133,14 @@ Three-column layout in `App.tsx`:
 | `backend/app/agent/tools/hil.py` | Custom HITL middleware |
 | `backend/app/agent/middleware/missing_params.py` | Missing params middleware + JSON Schema helpers |
 | `backend/app/agent/middleware/suggestions.py` | Suggestions parsing middleware |
+| `backend/app/agent/subagents/middleware.py` | SubAgent middleware — reactive hooks and task routing |
+| `backend/app/agent/subagents/runner.py` | SubAgent runner — compiles configs, caches LLM instances |
+| `backend/app/agent/subagents/agents/todo_tracker.py` | TODO tracker reactive sub-agent config |
 | `backend/app/api/chat.py` | Chat SSE endpoint |
 | `backend/app/sse/event_mapper.py` | Converts LangChain events to SSE frames |
 | `backend/app/knowledge/vector_store.py` | FAISS manager (dual-store) |
 | `backend/app/models/schemas.py` | Pydantic models for API request/response |
+| `backend/tests/conftest.py` | Pytest fixtures: mock/real settings, sample messages, markers |
 | `frontend/src/stores/chatStore.ts` | Zustand store (central state) |
 | `frontend/src/services/sse.ts` | SSE connection manager (fetch-based streaming) |
 | `frontend/src/design-tokens.ts` | Design system color/spacing tokens |
@@ -132,6 +164,7 @@ Backend config in `backend/app/config.py` loaded from `.env`:
 - `LLM_MODEL` — Model identifier (default: `"openai:gpt-4o"`)
 - `LLM_API_KEY` — Required for LLM
 - `LLM_BASE_URL` — Optional, for OpenAI-compatible APIs (Qwen, LM Studio, etc.)
+- `SUBAGENT_MODEL` — Optional, separate model for sub-agents (defaults to `LLM_MODEL`)
 - `KNOWLEDGE_DIR` — Path to knowledge markdown files (default: `../knowledge`)
 - `FAISS_INDEX_DIR` — Path to persist FAISS indexes (default: `./faiss_indexes`)
 - `MYSQL_URL` — MySQL connection string (configured but not yet integrated)
@@ -139,7 +172,7 @@ Backend config in `backend/app/config.py` loaded from `.env`:
 
 ## Design System
 
-Neo-Swiss International style with custom Tailwind colors:
+Neo-Swiss International style with custom Tailwind colors defined in `frontend/tailwind.config.js`:
 - Primary: `#A78BFA` (Lavender) — Interactive highlights
 - Secondary: `#60A5FA` (Sky Blue) — Running state
 - Success: `#34D399` (Mint) — Completed state
@@ -150,7 +183,7 @@ Design tokens defined in `frontend/src/design-tokens.ts`. Typography uses Inter 
 ## Current Limitations (Validation Stage)
 
 - Uses `InMemorySaver` checkpointer (state lost on restart)
-- No test suite configured (no pytest, vitest, or eslint)
 - `FakeEmbeddings` fallback when no LLM API key
 - MySQL config present but not integrated yet
 - In-memory conversation storage (no persistence)
+- No frontend tests, linting, or CI/CD pipeline configured
