@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from langchain.agents.middleware import ContextEditingMiddleware, ClearToolUsesEdit
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
@@ -143,6 +144,20 @@ def build_agent():
     middleware = [
         subagent_mw,
         SuggestionsMiddleware(),
+        ContextEditingMiddleware(
+            edits=[
+                ClearToolUsesEdit(
+                    trigger= 3000,
+                    keep=2,
+                    clear_tool_inputs= True,
+                    exclude_tools=[
+                        'search_design_doc',
+                        'search_terminology',
+                    ],
+                    placeholder="[cleared]"
+                ),
+            ]
+        )
     ]
 
     # Add MissingParams middleware when there are tools with param edit schema
