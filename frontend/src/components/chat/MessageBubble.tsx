@@ -1,4 +1,5 @@
 import type { Message } from "../../types";
+import { useState } from "react";
 import ThinkingIndicator from "./ThinkingIndicator";
 import DataTable from "./DataTable";
 import TodoStepper from "../todo/TodoStepper";
@@ -129,6 +130,17 @@ function renderToolResult(result: string) {
 
 export default function MessageBubble({ message }: Props) {
   const isUser = message.role === "user";
+  const [collapsedToolCallIds, setCollapsedToolCallIds] = useState<Set<string>>(new Set());
+
+  const toggleToolCollapse = (executionId: string) => {
+    const newCollapsed = new Set(collapsedToolCallIds);
+    if (newCollapsed.has(executionId)) {
+      newCollapsed.delete(executionId);
+    } else {
+      newCollapsed.add(executionId);
+    }
+    setCollapsedToolCallIds(newCollapsed);
+  };
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -153,51 +165,79 @@ export default function MessageBubble({ message }: Props) {
           {/* Tool call cards */}
           {message.toolCalls && message.toolCalls.length > 0 && (
             <div className="space-y-2 mb-3">
-              {message.toolCalls.map((tc) => (
-                <div
-                  key={tc.execution_id}
-                  className="rounded-lg border border-gray-100 p-3 bg-surface text-sm"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        tc.status === "success"
-                          ? "bg-success"
+              {message.toolCalls.map((tc) => {
+                const isCollapsed = collapsedToolCallIds.has(tc.execution_id);
+                return (
+                  <div
+                    key={tc.execution_id}
+                    className="rounded-lg border border-gray-100 bg-surface text-sm"
+                  >
+                    {/* Tool header with collapse button */}
+                    <div
+                      className="flex items-center gap-2 p-3 cursor-pointer hover:bg-gray-50 rounded-t-lg"
+                      onClick={() => toggleToolCollapse(tc.execution_id)}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          tc.status === "success"
+                            ? "bg-success"
+                            : tc.status === "failed"
+                            ? "bg-error"
+                            : "bg-secondary animate-pulse"
+                        }`}
+                      />
+                      <span className="font-medium text-text-primary flex-1">{tc.tool_name}</span>
+                      <span className="text-text-weak text-xs">
+                        {tc.status === "running"
+                          ? "执行中..."
+                          : tc.status === "success"
+                          ? "已完成"
                           : tc.status === "failed"
-                          ? "bg-error"
-                          : "bg-secondary animate-pulse"
-                      }`}
-                    />
-                    <span className="font-medium text-text-primary">{tc.tool_name}</span>
-                    <span className="text-text-weak text-xs">
-                      {tc.status === "running"
-                        ? "执行中..."
-                        : tc.status === "success"
-                        ? "已完成"
-                        : tc.status === "failed"
-                        ? "失败"
-                        : "待执行"}
-                    </span>
-                  </div>
-                  {tc.tableData && tc.tableData.length > 0 ? (
-                    <div className="space-y-3">
-                      {tc.result && (() => {
-                        const textBefore = tc.result.split("[DATA_TABLE]")[0].trim();
-                        return textBefore ? (
-                          <pre className="text-xs text-text-secondary whitespace-pre-wrap">
-                            {textBefore}
-                          </pre>
-                        ) : null;
-                      })()}
-                      {tc.tableData.map((table, idx) => (
-                        <DataTable key={idx} table={table} tableIndex={idx} />
-                      ))}
+                          ? "失败"
+                          : "待执行"}
+                      </span>
+                      {/* Collapse/expand icon */}
+                      <svg
+                        className={`w-4 h-4 text-text-secondary transition-transform ${
+                          isCollapsed ? "rotate-0" : "rotate-180"
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
                     </div>
-                  ) : (
-                    tc.result && renderToolResult(tc.result)
-                  )}
-                </div>
-              ))}
+                    {/* Tool content */}
+                    {!isCollapsed && (
+                      <div className="px-3 pb-3">
+                        {tc.tableData && tc.tableData.length > 0 ? (
+                          <div className="space-y-3">
+                            {tc.result && (() => {
+                              const textBefore = tc.result.split("[DATA_TABLE]")[0].trim();
+                              return textBefore ? (
+                                <pre className="text-xs text-text-secondary whitespace-pre-wrap">
+                                  {textBefore}
+                                </pre>
+                              ) : null;
+                            })()}
+                            {tc.tableData.map((table, idx) => (
+                              <DataTable key={idx} table={table} tableIndex={idx} />
+                            ))}
+                          </div>
+                        ) : (
+                          tc.result && renderToolResult(tc.result)
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
