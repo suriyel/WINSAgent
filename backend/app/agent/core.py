@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.agent.middleware.data_table import DataTableMiddleware
 from app.agent.middleware.missing_params import MissingParamsMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
 from app.agent.subagents import SubAgentMiddleware
@@ -143,6 +144,7 @@ def build_agent():
 
     middleware = [
         subagent_mw,
+        DataTableMiddleware(),
         SuggestionsMiddleware(),
         ContextEditingMiddleware(
             edits=[

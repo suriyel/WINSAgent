@@ -32,11 +32,20 @@ export interface Message {
   timestamp: number;
 }
 
+/** 从后端 DataTableMiddleware 提取的结构化表格数据 */
+export interface TableData {
+  headers: string[];
+  rows: string[][];
+  total_rows: number;
+  truncated: boolean;
+}
+
 export interface ToolCallInfo {
   tool_name: string;
   params: Record<string, unknown>;
   execution_id: string;
   result?: string;
+  tableData?: TableData[];
   status?: "pending" | "running" | "success" | "failed";
 }
 
@@ -140,6 +149,7 @@ export type SSEEventType =
   | "thinking"
   | "tool.call"
   | "tool.result"
+  | "table.data"
   | "hitl.pending"
   | "params.pending"
   | "todo.state"

@@ -1,5 +1,6 @@
 import type { Message } from "../../types";
 import ThinkingIndicator from "./ThinkingIndicator";
+import DataTable from "./DataTable";
 import TodoStepper from "../todo/TodoStepper";
 import HITLInlineCard from "../hitl/HITLInlineCard";
 import ParamsInlineCard from "../hitl/ParamsInlineCard";
@@ -170,7 +171,23 @@ export default function MessageBubble({ message }: Props) {
                         : "待执行"}
                     </span>
                   </div>
-                  {tc.result && renderToolResult(tc.result)}
+                  {tc.tableData && tc.tableData.length > 0 ? (
+                    <div className="space-y-3">
+                      {tc.result && (() => {
+                        const textBefore = tc.result.split("[DATA_TABLE]")[0].trim();
+                        return textBefore ? (
+                          <pre className="text-xs text-text-secondary whitespace-pre-wrap">
+                            {textBefore}
+                          </pre>
+                        ) : null;
+                      })()}
+                      {tc.tableData.map((table, idx) => (
+                        <DataTable key={idx} table={table} tableIndex={idx} />
+                      ))}
+                    </div>
+                  ) : (
+                    tc.result && renderToolResult(tc.result)
+                  )}
                 </div>
               ))}
             </div>

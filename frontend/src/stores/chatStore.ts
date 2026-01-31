@@ -11,6 +11,7 @@ import type {
   SSEEventType,
   Suggestion,
   SuggestionGroup,
+  TableData,
   TodoStep,
   ToolCallInfo,
 } from "../types";
@@ -192,6 +193,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               tc.execution_id === execId
                 ? { ...tc, result: data.result as string, status: data.status as ToolCallInfo["status"] }
                 : tc
+            );
+            msgs[lastIdx] = last;
+          }
+          return { messages: msgs };
+        }
+
+        case "table.data": {
+          if (last && last.role === "assistant") {
+            const execId = data.execution_id as string;
+            const tables = data.tables as TableData[];
+            last.toolCalls = (last.toolCalls ?? []).map((tc) =>
+              tc.execution_id === execId ? { ...tc, tableData: tables } : tc
             );
             msgs[lastIdx] = last;
           }

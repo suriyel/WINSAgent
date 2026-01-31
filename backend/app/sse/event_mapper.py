@@ -118,11 +118,20 @@ async def map_agent_stream_to_sse(
                     # --- Tool Message (tool result) ---
                     elif isinstance(msg, ToolMessage):
                         status = "failed" if getattr(msg, "status", None) == "error" else "success"
+                        exec_id = getattr(msg, "tool_call_id", str(uuid.uuid4()))
                         yield _sse("tool.result", {
-                            "execution_id": getattr(msg, "tool_call_id", str(uuid.uuid4())),
+                            "execution_id": exec_id,
                             "result": msg.content if isinstance(msg.content, str) else str(msg.content),
                             "status": status,
                         })
+
+                        # DataTableMiddleware 附加的全量表格数据
+                        table_data = msg.additional_kwargs.get("table_data")
+                        if table_data:
+                            yield _sse("table.data", {
+                                "execution_id": exec_id,
+                                "tables": table_data,
+                            })
 
             # --- Check for state updates in the event values ---
             for key, val in event.items():
