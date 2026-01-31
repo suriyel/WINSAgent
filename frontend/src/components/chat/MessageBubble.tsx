@@ -13,6 +13,14 @@ interface Props {
 /** Max number of data rows to display in a table (excluding the header). */
 const TABLE_MAX_ROWS = 10;
 
+/** Strip ```suggestions {...}``` and <suggestions>...</suggestions> blocks from display content. */
+function stripSuggestionsBlock(content: string): string {
+  return content
+    .replace(/```suggestions\s*\{[\s\S]*?\}\s*```/gi, "")
+    .replace(/<suggestions>[\s\S]*?<\/suggestions>/gi, "")
+    .trim();
+}
+
 /**
  * Parse a tool result string and render [DATA_TABLE] blocks as HTML tables.
  * Non-table text is rendered as plain preformatted text.
@@ -215,11 +223,14 @@ export default function MessageBubble({ message }: Props) {
           )}
 
           {/* Message text */}
-          {message.content && (
-            <div className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">
-              {message.content}
-            </div>
-          )}
+          {message.content && (() => {
+            const displayContent = stripSuggestionsBlock(message.content);
+            return displayContent ? (
+              <div className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">
+                {displayContent}
+              </div>
+            ) : null;
+          })()}
 
           {/* Suggestion chips - 建议选项 */}
           {message.suggestions && !message.isStreaming && (

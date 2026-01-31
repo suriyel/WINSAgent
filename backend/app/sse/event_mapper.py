@@ -83,13 +83,13 @@ async def map_agent_stream_to_sse(
             for key, val in event.items():
                 if key.startswith("__"):
                     continue
-                if isinstance(val, dict) and "todos" in val:
-                    has_todo = True
+                if not isinstance(val, dict):
                     continue
-                if isinstance(val, dict) and "messages" in val:
+                if "todos" in val:
+                    has_todo = True
+                if "messages" in val and messages is None:
                     messages = val["messages"]
                     node_name = key
-                    break
 
             if not messages and not has_todo:
                 continue
