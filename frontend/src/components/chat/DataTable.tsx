@@ -11,10 +11,10 @@ interface Props {
 const ROWS_PER_PAGE = 10;
 
 /**
- * Column names that should be excluded from chartable measures
- * (coordinates, IDs that look numeric, etc.).
+ * Column names that are geographic coordinates — kept as secondary (lower
+ * priority) measures so the default Y-axis is a meaningful indicator.
  */
-const EXCLUDED_MEASURE_PATTERN =
+const COORD_PATTERN =
   /^(longitude|latitude|lon|lat|经度|纬度|lng|x坐标|y坐标)$/i;
 
 /** Convert TableData (headers + string[][]) to flat rows for AutoChart. */
@@ -37,7 +37,8 @@ function tableToChartPending(table: TableData): ChartPending | null {
   }
 
   const dimensions: string[] = [];
-  const measures: string[] = [];
+  const primaryMeasures: string[] = [];   // meaningful indicators (RSRP, SINR, …)
+  const secondaryMeasures: string[] = []; // coordinates — still chartable but lower priority
   const labels: Record<string, string> = {};
 
   for (let ci = 0; ci < table.headers.length; ci++) {
@@ -45,31 +46,39 @@ function tableToChartPending(table: TableData): ChartPending | null {
     labels[key] = key;
 
     if (numericCols.has(ci)) {
-      // Exclude coordinate-like columns from measures
-      if (EXCLUDED_MEASURE_PATTERN.test(key)) {
-        // Don't add to dimensions either — too many unique values
-        continue;
+      if (COORD_PATTERN.test(key)) {
+        secondaryMeasures.push(key);
+      } else {
+        primaryMeasures.push(key);
       }
-      measures.push(key);
     } else {
       dimensions.push(key);
     }
   }
 
-  // Need at least 1 dimension + 1 measure to be chartable
-  if (measures.length < 1 || dimensions.length < 1) return null;
+  // Primary indicators first, then coordinates — default selection = first primary
+  const measures = [...primaryMeasures, ...secondaryMeasures];
+  if (measures.length < 1) return null;
 
+  // Build flat rows (keep ALL columns including coordinates)
   const rows: Record<string, unknown>[] = table.rows.map((row) => {
     const obj: Record<string, unknown> = {};
     for (let ci = 0; ci < table.headers.length; ci++) {
       const key = table.headers[ci];
-      // Skip excluded columns
-      if (numericCols.has(ci) && EXCLUDED_MEASURE_PATTERN.test(key)) continue;
       const raw = row[ci] ?? "";
       obj[key] = numericCols.has(ci) ? Number(raw) || 0 : raw;
     }
     return obj;
   });
+
+  // If no string dimensions exist (e.g. grid-level data with only numeric
+  // columns), create a synthetic row-index dimension so charts have an X axis.
+  if (dimensions.length === 0) {
+    const indexKey = "#";
+    dimensions.push(indexKey);
+    labels[indexKey] = "序号";
+    rows.forEach((row, i) => { row[indexKey] = String(i + 1); });
+  }
 
   return {
     execution_id: "",
