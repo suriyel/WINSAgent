@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 import type {
+  ChartData,
+  ChartPending,
   Conversation,
   HITLAction,
   HITLPending,
@@ -206,6 +208,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
             last.toolCalls = (last.toolCalls ?? []).map((tc) =>
               tc.execution_id === execId ? { ...tc, tableData: tables } : tc
             );
+            msgs[lastIdx] = last;
+          }
+          return { messages: msgs };
+        }
+
+        case "chart.data": {
+          if (last && last.role === "assistant") {
+            const chartData: ChartPending = {
+              execution_id: data.execution_id as string,
+              chart_type: data.chart_type as string,
+              data: data.data as ChartData,
+            };
+            last.chartPending = chartData;
             msgs[lastIdx] = last;
           }
           return { messages: msgs };

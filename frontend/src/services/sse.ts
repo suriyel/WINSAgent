@@ -10,6 +10,7 @@ const SSE_EVENT_TYPES: SSEEventType[] = [
   "tool.call",
   "tool.result",
   "table.data",
+  "chart.data",
   "hitl.pending",
   "params.pending",
   "todo.state",

@@ -1,11 +1,13 @@
 import type { Message } from "../../types";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import ThinkingIndicator from "./ThinkingIndicator";
 import DataTable from "./DataTable";
 import TodoStepper from "../todo/TodoStepper";
 import HITLInlineCard from "../hitl/HITLInlineCard";
 import ParamsInlineCard from "../hitl/ParamsInlineCard";
 import SuggestionChips from "./SuggestionChips";
+
+const ComparisonChart = lazy(() => import("../chart/ComparisonChart"));
 
 interface Props {
   message: Message;
@@ -259,6 +261,15 @@ export default function MessageBubble({ message }: Props) {
           {message.todoSteps && message.todoSteps.length > 0 && (
             <div className="mb-3">
               <TodoStepper steps={message.todoSteps} />
+            </div>
+          )}
+
+          {/* Chart comparison */}
+          {message.chartPending && (
+            <div className="mb-3">
+              <Suspense fallback={<div className="h-40 flex items-center justify-center text-sm text-text-weak">加载图表组件...</div>}>
+                <ComparisonChart chartPending={message.chartPending} />
+              </Suspense>
             </div>
           )}
 

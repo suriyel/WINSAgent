@@ -6,11 +6,24 @@ and optimization simulation results at both cell-level and grid-level.
 
 from __future__ import annotations
 
+import json
 import random
 
 from langchain.tools import tool
 
 from app.agent.tools.registry import tool_registry
+
+
+# ---------------------------------------------------------------------------
+# Indicator mapping: root cause → simulation (for compare tool)
+# ---------------------------------------------------------------------------
+
+INDICATOR_MAPPING: dict[str, str] = {
+    "RSRP均值(dBm)":     "仿真RSRP均值(dBm)",
+    "SINR均值(dB)":      "仿真SINR均值(dB)",
+    "MR覆盖率(%)":       "仿真覆盖率(%)",
+    "RRC连接成功率(%)":   "仿真RRC连接成功率(%)",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +394,114 @@ def query_simulation_results(
 
 
 # ---------------------------------------------------------------------------
+# Tool 4: compare_simulation_data (查询类，无HITL)
+# ---------------------------------------------------------------------------
+
+@tool
+def compare_simulation_data(
+    digitaltwins_id: str,
+    indicators: list[str],
+) -> str:
+    """对比仿真前后的小区级网络性能指标数据。
+    自动查询根因分析和仿真结果，计算差值并生成可视化对比数据。
+
+    参数说明：
+    - digitaltwins_id: 数字孪生场景唯一标识（如 DT20260101），通过 match_scenario 获取
+    - indicators: 需要对比的根因指标列表，如 ["RSRP均值(dBm)", "SINR均值(dB)"]
+      可选指标: RSRP均值(dBm), SINR均值(dB), MR覆盖率(%), RRC连接成功率(%)
+    """
+    # 1. 验证场景
+    scenario = next(
+        (s for s in MOCK_SCENARIOS if s["digitaltwinsId"] == digitaltwins_id),
+        None,
+    )
+    if not scenario:
+        return f"未找到场景 {digitaltwins_id}，请先使用 match_scenario 工具获取有效的场景ID。"
+
+    # 2. 验证指标并映射
+    valid = [ind for ind in indicators if ind in INDICATOR_MAPPING]
+    if not valid:
+        return (
+            f"无有效对比指标。可选指标: {list(INDICATOR_MAPPING.keys())}"
+        )
+    sim_indicators = [INDICATOR_MAPPING[ind] for ind in valid]
+
+    # 3. 获取根因数据和仿真数据
+    root_rows = _generate_cell_root_cause_data(digitaltwins_id, valid)
+    sim_rows = _generate_cell_simulation_data(digitaltwins_id, sim_indicators)
+
+    # 4. 按 cell_id 合并，计算差值
+    sim_map = {r["小区id"]: r for r in sim_rows}
+    cells: list[dict] = []
+    for root in root_rows:
+        cid = root["小区id"]
+        sim = sim_map.get(cid, {})
+        before = {ind: root.get(ind, 0) for ind in valid}
+        after = {ind: sim.get(INDICATOR_MAPPING[ind], 0) for ind in valid}
+        diff = {ind: round(after[ind] - before[ind], 2) for ind in valid}
+        cells.append({
+            "cell_id": cid,
+            "area": scenario["area"],
+            "before": before,
+            "after": after,
+            "diff": diff,
+        })
+
+    if not cells:
+        return "无法生成对比数据：未找到匹配的小区记录。"
+
+    # 5. 统计聚合
+    areas = sorted({c["area"] for c in cells})
+    by_area: dict = {}
+    for area in areas:
+        area_cells = [c for c in cells if c["area"] == area]
+        n = len(area_cells)
+        by_area[area] = {
+            "before_avg": {
+                ind: round(sum(c["before"][ind] for c in area_cells) / n, 2)
+                for ind in valid
+            },
+            "after_avg": {
+                ind: round(sum(c["after"][ind] for c in area_cells) / n, 2)
+                for ind in valid
+            },
+            "diff_avg": {
+                ind: round(sum(c["diff"][ind] for c in area_cells) / n, 2)
+                for ind in valid
+            },
+        }
+
+    summary = {
+        "avg_improvement": {
+            ind: round(sum(c["diff"][ind] for c in cells) / len(cells), 2)
+            for ind in valid
+        }
+    }
+
+    # 6. 构建 chart_data JSON
+    chart_data = {
+        "chart_type": "grouped_bar",
+        "data": {
+            "cells": cells,
+            "indicators": valid,
+            "statistics": {"by_area": by_area, "summary": summary},
+            "filters": {"areas": areas, "threshold": 1.0},
+        },
+    }
+
+    # 7. 返回文本摘要 + [CHART_DATA] 块（由 ChartDataMiddleware 提取）
+    text_summary = (
+        f"场景 {digitaltwins_id} - {scenario['description']}的仿真前后对比完成：\n"
+        f"对比指标: {', '.join(valid)}\n"
+        f"小区数量: {len(cells)}\n"
+        f"平均提升: {summary['avg_improvement']}\n"
+    )
+
+    chart_json = json.dumps(chart_data, ensure_ascii=False)
+    return f"{text_summary}\n[CHART_DATA]{chart_json}[/CHART_DATA]"
+
+
+# ---------------------------------------------------------------------------
 # Register all telecom tools
 # ---------------------------------------------------------------------------
 
@@ -389,3 +510,4 @@ def register_telecom_tools() -> None:
     tool_registry.register(match_scenario, category="query")
     tool_registry.register(query_root_cause_analysis, category="query")
     tool_registry.register(query_simulation_results, category="query")
+    tool_registry.register(compare_simulation_data, category="query")

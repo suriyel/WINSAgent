@@ -28,6 +28,7 @@ export interface Message {
   hitlPending?: HITLPending;
   paramsPending?: ParamsPending;  // 缺省参数待填写
   suggestions?: SuggestionGroup;  // 建议回复选项
+  chartPending?: ChartPending;    // 图表对比数据
   isStreaming?: boolean;
   timestamp: number;
 }
@@ -134,6 +135,41 @@ export interface SuggestionGroup {
   prompt?: string;        // 可选的提示文本
 }
 
+// --- Chart comparison data (for chart.data SSE event) ---
+
+export interface CellComparisonData {
+  cell_id: string;
+  area: string;
+  before: Record<string, number>;
+  after: Record<string, number>;
+  diff: Record<string, number>;
+}
+
+export interface ChartData {
+  cells: CellComparisonData[];
+  indicators: string[];
+  statistics: {
+    by_area: Record<string, {
+      before_avg: Record<string, number>;
+      after_avg: Record<string, number>;
+      diff_avg: Record<string, number>;
+    }>;
+    summary: {
+      avg_improvement: Record<string, number>;
+    };
+  };
+  filters: {
+    areas: string[];
+    threshold: number;
+  };
+}
+
+export interface ChartPending {
+  execution_id: string;
+  chart_type: string;
+  data: ChartData;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -150,6 +186,7 @@ export type SSEEventType =
   | "tool.call"
   | "tool.result"
   | "table.data"
+  | "chart.data"
   | "hitl.pending"
   | "params.pending"
   | "todo.state"
