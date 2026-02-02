@@ -499,15 +499,41 @@ def compare_simulation_data(
         }
     }
 
-    # 6. 构建 chart_data JSON
+    # 6. Flatten to generic rows for AutoChart
+    flat_rows: list[dict] = []
+    for cell in cells:
+        for ind in valid:
+            flat_rows.append({
+                "cell_id": cell["cell_id"],
+                "area": cell["area"],
+                "indicator": ind,
+                "stage": "优化前",
+                "value": round(cell["before"][ind], 2),
+            })
+            flat_rows.append({
+                "cell_id": cell["cell_id"],
+                "area": cell["area"],
+                "indicator": ind,
+                "stage": "优化后",
+                "value": round(cell["after"][ind], 2),
+            })
+
     resolved_chart_type = chart_type if chart_type in VALID_CHART_TYPES else "grouped_bar_chart"
     chart_data = {
         "chart_type": resolved_chart_type,
-        "data": {
-            "cells": cells,
-            "indicators": valid,
-            "statistics": {"by_area": by_area, "summary": summary},
-            "filters": {"areas": areas, "threshold": 1.0},
+        "title": f"场景 {digitaltwins_id} 仿真前后对比",
+        "rows": flat_rows,
+        "meta": {
+            "dimensions": ["cell_id", "area", "indicator", "stage"],
+            "measures": ["value"],
+            "labels": {
+                "cell_id": "小区",
+                "area": "区域",
+                "indicator": "指标",
+                "stage": "阶段",
+                "value": "数值",
+            },
+            "summary": summary,
         },
     }
 

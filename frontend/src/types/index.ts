@@ -135,39 +135,21 @@ export interface SuggestionGroup {
   prompt?: string;        // 可选的提示文本
 }
 
-// --- Chart comparison data (for chart.data SSE event) ---
+// --- Generic chart data (for chart.data SSE event) ---
 
-export interface CellComparisonData {
-  cell_id: string;
-  area: string;
-  before: Record<string, number>;
-  after: Record<string, number>;
-  diff: Record<string, number>;
-}
-
-export interface ChartData {
-  cells: CellComparisonData[];
-  indicators: string[];
-  statistics: {
-    by_area: Record<string, {
-      before_avg: Record<string, number>;
-      after_avg: Record<string, number>;
-      diff_avg: Record<string, number>;
-    }>;
-    summary: {
-      avg_improvement: Record<string, number>;
-    };
-  };
-  filters: {
-    areas: string[];
-    threshold: number;
-  };
+export interface ChartMeta {
+  dimensions?: string[];
+  measures?: string[];
+  labels?: Record<string, string>;
+  summary?: Record<string, unknown>;
 }
 
 export interface ChartPending {
   execution_id: string;
   chart_type: string;
-  data: ChartData;
+  title?: string;
+  rows: Record<string, unknown>[];
+  meta?: ChartMeta;
 }
 
 export interface ToolDefinition {

@@ -133,13 +133,12 @@ async def map_agent_stream_to_sse(
                                 "tables": table_data,
                             })
 
-                        # ChartDataMiddleware 附加的图表对比数据
+                        # ChartDataMiddleware 附加的图表数据（通用格式：rows + meta）
                         chart_data = msg.additional_kwargs.get("chart_data")
                         if chart_data:
                             yield _sse("chart.data", {
                                 "execution_id": exec_id,
-                                "chart_type": chart_data.get("chart_type", "grouped_bar"),
-                                "data": chart_data.get("data", {}),
+                                **chart_data,
                             })
 
             # --- Check for state updates in the event values ---

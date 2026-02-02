@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import type {
-  ChartData,
+  ChartMeta,
   ChartPending,
   Conversation,
   HITLAction,
@@ -218,7 +218,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const chartData: ChartPending = {
               execution_id: data.execution_id as string,
               chart_type: data.chart_type as string,
-              data: data.data as ChartData,
+              title: data.title as string | undefined,
+              rows: data.rows as Record<string, unknown>[],
+              meta: data.meta as ChartMeta | undefined,
             };
             last.chartPending = chartData;
             msgs[lastIdx] = last;

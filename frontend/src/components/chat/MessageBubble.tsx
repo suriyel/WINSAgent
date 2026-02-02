@@ -7,7 +7,7 @@ import HITLInlineCard from "../hitl/HITLInlineCard";
 import ParamsInlineCard from "../hitl/ParamsInlineCard";
 import SuggestionChips from "./SuggestionChips";
 
-const ComparisonChart = lazy(() => import("../chart/ComparisonChart"));
+const AutoChart = lazy(() => import("../chart/AutoChart"));
 
 interface Props {
   message: Message;
@@ -264,11 +264,11 @@ export default function MessageBubble({ message }: Props) {
             </div>
           )}
 
-          {/* Chart comparison */}
+          {/* Chart */}
           {message.chartPending && (
             <div className="mb-3">
               <Suspense fallback={<div className="h-40 flex items-center justify-center text-sm text-text-weak">加载图表组件...</div>}>
-                <ComparisonChart chartPending={message.chartPending} />
+                <AutoChart chartPending={message.chartPending} />
               </Suspense>
             </div>
           )}
