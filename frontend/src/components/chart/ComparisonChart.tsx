@@ -1,18 +1,189 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { Chart } from "@antv/g2";
 import { Advisor } from "@antv/ava";
-import type { ChartPending } from "../../types";
+import type { ChartPending, CellComparisonData } from "../../types";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Props {
   chartPending: ChartPending;
 }
 
+/** Flat row format used by G2 and AVA. */
+interface FlatRow {
+  cell_id: string;
+  area: string;
+  indicator: string;
+  stage: string;
+  value: number;
+}
+
+/** Merged advice entry combining backend + AVA recommendations. */
+interface MergedAdvice {
+  type: string;
+  label: string;
+  score: number;
+  isBackendRecommended: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Chart type configs — each type defines a label + G2 options builder
+// ---------------------------------------------------------------------------
+
+interface ChartTypeConfig {
+  label: string;
+  /** Build G2-compatible options from flat data. Return null to signal "not applicable". */
+  buildOptions: (
+    data: FlatRow[],
+    indicators: string[],
+    cells: CellComparisonData[],
+  ) => Record<string, unknown> | null;
+}
+
+const CHART_TYPE_CONFIGS: Record<string, ChartTypeConfig> = {
+  grouped_bar_chart: {
+    label: "分组柱状图",
+    buildOptions: (data, indicators) => ({
+      type: "interval",
+      data,
+      encode: { x: "cell_id", y: "value", color: "stage" },
+      transform: [{ type: "dodgeX" }],
+      scale: {
+        x: { type: "band", padding: 0.2 },
+        color: { range: ["#60A5FA", "#34D399"] },
+      },
+      axis: {
+        x: { title: "小区", labelAutoRotate: true },
+        y: { title: indicators.length === 1 ? indicators[0] : "指标值" },
+      },
+      interaction: { tooltip: true },
+      legend: { color: { position: "top" } },
+    }),
+  },
+
+  line_chart: {
+    label: "折线图",
+    buildOptions: (data, indicators) => ({
+      type: "line",
+      data,
+      encode: { x: "cell_id", y: "value", color: "stage" },
+      scale: {
+        color: { range: ["#60A5FA", "#34D399"] },
+      },
+      axis: {
+        x: { title: "小区", labelAutoRotate: true },
+        y: { title: indicators.length === 1 ? indicators[0] : "指标值" },
+      },
+      style: { lineWidth: 2 },
+      interaction: { tooltip: true },
+      legend: { color: { position: "top" } },
+    }),
+  },
+
+  stacked_bar_chart: {
+    label: "堆叠柱状图",
+    buildOptions: (data, indicators) => ({
+      type: "interval",
+      data,
+      encode: { x: "cell_id", y: "value", color: "stage" },
+      transform: [{ type: "stackY" }],
+      scale: {
+        x: { type: "band", padding: 0.2 },
+        color: { range: ["#60A5FA", "#34D399"] },
+      },
+      axis: {
+        x: { title: "小区", labelAutoRotate: true },
+        y: { title: indicators.length === 1 ? indicators[0] : "指标值" },
+      },
+      interaction: { tooltip: true },
+      legend: { color: { position: "top" } },
+    }),
+  },
+
+  scatter_plot: {
+    label: "散点图",
+    buildOptions: (_data, indicators, cells) => {
+      // Scatter: x = before, y = after for first indicator
+      const ind = indicators[0];
+      if (!ind) return null;
+      const scatterData = cells.map((c) => ({
+        cell_id: c.cell_id,
+        area: c.area,
+        before: c.before[ind] ?? 0,
+        after: c.after[ind] ?? 0,
+        diff: c.diff[ind] ?? 0,
+      }));
+      return {
+        type: "point",
+        data: scatterData,
+        encode: { x: "before", y: "after", size: "diff", color: "area" },
+        scale: {
+          color: { range: ["#A78BFA", "#60A5FA", "#34D399", "#FBBF24", "#F87171"] },
+        },
+        axis: {
+          x: { title: `${ind} (优化前)` },
+          y: { title: `${ind} (优化后)` },
+        },
+        style: { fillOpacity: 0.7 },
+        interaction: { tooltip: true },
+        legend: { color: { position: "top" } },
+      };
+    },
+  },
+
+  heatmap: {
+    label: "热力图",
+    buildOptions: (_data, indicators, cells) => {
+      // Heatmap: x = cell_id, y = indicator, color = diff value
+      const heatData: Record<string, unknown>[] = [];
+      for (const cell of cells) {
+        for (const ind of indicators) {
+          heatData.push({
+            cell_id: cell.cell_id,
+            indicator: ind,
+            diff: cell.diff[ind] ?? 0,
+          });
+        }
+      }
+      return {
+        type: "cell",
+        data: heatData,
+        encode: { x: "cell_id", y: "indicator", color: "diff" },
+        scale: {
+          color: { palette: "RdYlGn", domain: [-10, 10] },
+        },
+        axis: {
+          x: { title: "小区", labelAutoRotate: true },
+          y: { title: "指标" },
+        },
+        style: { inset: 1 },
+        interaction: { tooltip: true },
+        legend: { color: { position: "top", title: "差值" } },
+      };
+    },
+  },
+
+  table: {
+    label: "数据表格",
+    // Table renders as HTML, not G2 — return null to skip chart rendering
+    buildOptions: () => null,
+  },
+};
+
+const SUPPORTED_CHART_TYPES = Object.keys(CHART_TYPE_CONFIGS);
+
+// ---------------------------------------------------------------------------
+// Data helpers
+// ---------------------------------------------------------------------------
+
 /** Flatten comparison cells into a row-per-indicator-per-stage format for G2/AVA. */
 function flattenCells(
-  cells: ChartPending["data"]["cells"],
+  cells: CellComparisonData[],
   indicators: string[],
-) {
-  const rows: Record<string, unknown>[] = [];
+): FlatRow[] {
+  const rows: FlatRow[] = [];
   for (const cell of cells) {
     for (const ind of indicators) {
       rows.push({
@@ -34,24 +205,70 @@ function flattenCells(
   return rows;
 }
 
+/** Merge backend chart_type with AVA advise results into a sorted list. */
+function getMergedAdvices(
+  avaAdvices: { type: string; score: number }[],
+  backendChartType: string,
+): MergedAdvice[] {
+  // Collect unique types: backend first, then AVA in score order
+  const seen = new Set<string>();
+  const merged: MergedAdvice[] = [];
+
+  const addType = (type: string, score: number, isBackend: boolean) => {
+    if (seen.has(type) || !(type in CHART_TYPE_CONFIGS)) return;
+    seen.add(type);
+    merged.push({
+      type,
+      label: CHART_TYPE_CONFIGS[type].label,
+      score,
+      isBackendRecommended: isBackend,
+    });
+  };
+
+  // Backend recommendation first
+  addType(backendChartType, 100, true);
+
+  // AVA recommendations
+  for (const adv of avaAdvices) {
+    addType(adv.type, adv.score, false);
+  }
+
+  // Add remaining supported types not yet included (with score 0)
+  for (const type of SUPPORTED_CHART_TYPES) {
+    addType(type, 0, false);
+  }
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function ComparisonChart({ chartPending }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
 
-  const { data } = chartPending;
+  const { data, chart_type: backendChartType } = chartPending;
 
   // ----- Filter state -----
   const [selectedAreas, setSelectedAreas] = useState<string[]>(data.filters.areas);
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>(data.indicators);
   const [threshold, setThreshold] = useState(data.filters.threshold);
   const [collapsed, setCollapsed] = useState(false);
+  const [renderChartType, setRenderChartType] = useState<string>(
+    backendChartType in CHART_TYPE_CONFIGS ? backendChartType : "grouped_bar_chart",
+  );
 
   // Reset filters when data changes
   useEffect(() => {
     setSelectedAreas(data.filters.areas);
     setSelectedIndicators(data.indicators);
     setThreshold(data.filters.threshold);
-  }, [data]);
+    setRenderChartType(
+      backendChartType in CHART_TYPE_CONFIGS ? backendChartType : "grouped_bar_chart",
+    );
+  }, [data, backendChartType]);
 
   // ----- Filtered cells -----
   const filteredCells = useMemo(() => {
@@ -71,29 +288,43 @@ export default function ComparisonChart({ chartPending }: Props) {
   );
 
   // ----- AVA recommendation -----
-  const adviceList = useMemo(() => {
+  const avaAdvices = useMemo(() => {
     if (flatData.length === 0) return [];
     try {
       const advisor = new Advisor();
-      return advisor.advise({
-        data: flatData as Record<string, unknown>[],
+      const results = advisor.advise({
+        data: flatData as unknown as Record<string, unknown>[],
         options: {
           purpose: "Comparison",
           refine: true,
           theme: { primaryColor: "#A78BFA" },
         },
       });
+      return results.map((r: { type: string; score: number }) => ({
+        type: r.type,
+        score: r.score,
+      }));
     } catch {
       return [];
     }
   }, [flatData]);
 
-  // AVA recommended chart type label
-  const recommendedType = adviceList.length > 0 ? adviceList[0].type : "grouped_bar_chart";
+  // ----- Merged advices (backend + AVA) -----
+  const mergedAdvices = useMemo(
+    () => getMergedAdvices(avaAdvices, backendChartType),
+    [avaAdvices, backendChartType],
+  );
+
+  // ----- Build G2 options for current chart type -----
+  const chartOptions = useMemo(() => {
+    const config = CHART_TYPE_CONFIGS[renderChartType];
+    if (!config) return null;
+    return config.buildOptions(flatData, selectedIndicators, filteredCells);
+  }, [renderChartType, flatData, selectedIndicators, filteredCells]);
 
   // ----- G2 Render -----
   useEffect(() => {
-    if (!containerRef.current || flatData.length === 0 || collapsed) return;
+    if (!containerRef.current || !chartOptions || collapsed) return;
 
     if (chartRef.current) {
       chartRef.current.destroy();
@@ -106,27 +337,7 @@ export default function ComparisonChart({ chartPending }: Props) {
       height: 360,
     });
 
-    chart.options({
-      type: "interval",
-      data: flatData,
-      encode: {
-        x: "cell_id",
-        y: "value",
-        color: "stage",
-      },
-      transform: [{ type: "dodgeX" }],
-      scale: {
-        x: { type: "band", padding: 0.2 },
-        color: { range: ["#60A5FA", "#34D399"] },
-      },
-      axis: {
-        x: { title: "小区", labelAutoRotate: true },
-        y: { title: selectedIndicators.length === 1 ? selectedIndicators[0] : "指标值" },
-      },
-      interaction: { tooltip: true },
-      legend: { color: { position: "top" } },
-    });
-
+    chart.options({ ...chartOptions, autoFit: true });
     chart.render();
     chartRef.current = chart;
 
@@ -136,7 +347,7 @@ export default function ComparisonChart({ chartPending }: Props) {
         chartRef.current = null;
       }
     };
-  }, [flatData, collapsed, selectedIndicators]);
+  }, [chartOptions, collapsed]);
 
   // ----- Area toggle -----
   const toggleArea = useCallback((area: string) => {
@@ -153,7 +364,7 @@ export default function ComparisonChart({ chartPending }: Props) {
   const toggleIndicator = useCallback((ind: string) => {
     setSelectedIndicators((prev) => {
       if (prev.includes(ind)) {
-        if (prev.length <= 1) return prev; // keep at least one
+        if (prev.length <= 1) return prev;
         return prev.filter((i) => i !== ind);
       }
       return [...prev, ind];
@@ -162,6 +373,9 @@ export default function ComparisonChart({ chartPending }: Props) {
 
   // ----- Statistics -----
   const summaryStats = data.statistics.summary.avg_improvement;
+
+  // ----- Is table mode -----
+  const isTableMode = renderChartType === "table";
 
   return (
     <div className="rounded-lg border border-primary/30 bg-white overflow-hidden">
@@ -189,7 +403,27 @@ export default function ComparisonChart({ chartPending }: Props) {
 
       {!collapsed && (
         <div className="px-4 py-3 space-y-3">
-          {/* Toolbar */}
+          {/* Chart type switcher */}
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {mergedAdvices.map((advice) => (
+              <button
+                key={advice.type}
+                onClick={() => setRenderChartType(advice.type)}
+                className={`px-2.5 py-1 rounded-md border transition-colors ${
+                  renderChartType === advice.type
+                    ? "bg-primary text-white border-primary"
+                    : "bg-gray-50 border-gray-200 text-text-secondary hover:border-primary/40"
+                }`}
+              >
+                {advice.label}
+                {advice.isBackendRecommended && (
+                  <span className="ml-1 opacity-70">*</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Filters toolbar */}
           <div className="flex flex-wrap gap-3 text-xs">
             {/* Area filter */}
             {data.filters.areas.length > 1 && (
@@ -245,12 +479,18 @@ export default function ComparisonChart({ chartPending }: Props) {
             </div>
           </div>
 
-          {/* Chart container */}
-          {flatData.length > 0 ? (
+          {/* Chart / Table / Empty */}
+          {flatData.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-text-weak text-sm">
+              无满足条件的数据
+            </div>
+          ) : isTableMode ? (
+            <ComparisonTable cells={filteredCells} indicators={selectedIndicators} />
+          ) : chartOptions ? (
             <div ref={containerRef} className="w-full" style={{ minHeight: 360 }} />
           ) : (
             <div className="flex items-center justify-center h-40 text-text-weak text-sm">
-              无满足条件的数据
+              该图表类型不适用于当前数据
             </div>
           )}
 
@@ -265,14 +505,85 @@ export default function ComparisonChart({ chartPending }: Props) {
                 <span className="text-text-weak">均值提升</span>
               </div>
             ))}
-            {adviceList.length > 0 && (
+            {avaAdvices.length > 0 && (
               <div className="ml-auto text-xs text-text-weak">
-                AVA 推荐: {recommendedType}
+                AVA 推荐: {CHART_TYPE_CONFIGS[avaAdvices[0].type]?.label ?? avaAdvices[0].type}
               </div>
             )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Table sub-component (for "table" chart type)
+// ---------------------------------------------------------------------------
+
+function ComparisonTable({
+  cells,
+  indicators,
+}: {
+  cells: CellComparisonData[];
+  indicators: string[];
+}) {
+  return (
+    <div className="overflow-x-auto max-h-80 overflow-y-auto">
+      <table className="min-w-full text-xs border-collapse">
+        <thead className="sticky top-0">
+          <tr className="bg-primary/10">
+            <th className="px-2 py-1.5 text-left font-semibold text-text-primary border border-gray-200">小区</th>
+            <th className="px-2 py-1.5 text-left font-semibold text-text-primary border border-gray-200">区域</th>
+            {indicators.map((ind) => (
+              <th key={`b-${ind}`} className="px-2 py-1.5 text-right font-semibold text-text-primary border border-gray-200 whitespace-nowrap">
+                {ind}<br /><span className="font-normal text-text-weak">优化前</span>
+              </th>
+            ))}
+            {indicators.map((ind) => (
+              <th key={`a-${ind}`} className="px-2 py-1.5 text-right font-semibold text-text-primary border border-gray-200 whitespace-nowrap">
+                {ind}<br /><span className="font-normal text-text-weak">优化后</span>
+              </th>
+            ))}
+            {indicators.map((ind) => (
+              <th key={`d-${ind}`} className="px-2 py-1.5 text-right font-semibold text-text-primary border border-gray-200 whitespace-nowrap">
+                {ind}<br /><span className="font-normal text-text-weak">差值</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cells.map((cell, ri) => (
+            <tr key={cell.cell_id} className={ri % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+              <td className="px-2 py-1 text-text-secondary border border-gray-200 whitespace-nowrap">{cell.cell_id}</td>
+              <td className="px-2 py-1 text-text-secondary border border-gray-200">{cell.area}</td>
+              {indicators.map((ind) => (
+                <td key={`b-${ind}`} className="px-2 py-1 text-right text-text-secondary border border-gray-200">
+                  {(cell.before[ind] ?? 0).toFixed(1)}
+                </td>
+              ))}
+              {indicators.map((ind) => (
+                <td key={`a-${ind}`} className="px-2 py-1 text-right text-text-secondary border border-gray-200">
+                  {(cell.after[ind] ?? 0).toFixed(1)}
+                </td>
+              ))}
+              {indicators.map((ind) => {
+                const d = cell.diff[ind] ?? 0;
+                return (
+                  <td
+                    key={`d-${ind}`}
+                    className={`px-2 py-1 text-right font-medium border border-gray-200 ${
+                      d > 0 ? "text-success" : d < 0 ? "text-error" : "text-text-weak"
+                    }`}
+                  >
+                    {d > 0 ? "+" : ""}{d.toFixed(2)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

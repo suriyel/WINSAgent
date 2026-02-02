@@ -27,6 +27,24 @@ INDICATOR_MAPPING: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Available chart types for compare_simulation_data (LLM selects)
+# ---------------------------------------------------------------------------
+
+AVAILABLE_CHART_TYPES: list[dict[str, str]] = [
+    {"grouped_bar_chart": "分组柱状图 - 适用于分组对比分析，展示多个小区优化前后指标数值的直观对比"},
+    {"line_chart": "折线图 - 适用于展示指标随小区变化的趋势对比"},
+    {"stacked_bar_chart": "堆叠柱状图 - 适用于展示优化前后指标叠加的总量对比"},
+    {"scatter_plot": "散点图 - 适用于探索优化前后数值关系、检测异常小区"},
+    {"heatmap": "热力图 - 适用于大规模数据集的差值分布可视化"},
+    {"table": "数据表格 - 适用于需要查看精确数值的场景"},
+]
+
+VALID_CHART_TYPES: set[str] = {
+    k for d in AVAILABLE_CHART_TYPES for k in d
+}
+
+
+# ---------------------------------------------------------------------------
 # Mock scenario data
 # ---------------------------------------------------------------------------
 
@@ -401,6 +419,7 @@ def query_simulation_results(
 def compare_simulation_data(
     digitaltwins_id: str,
     indicators: list[str],
+    chart_type: str = "grouped_bar_chart",
 ) -> str:
     """对比仿真前后的小区级网络性能指标数据。
     自动查询根因分析和仿真结果，计算差值并生成可视化对比数据。
@@ -409,6 +428,8 @@ def compare_simulation_data(
     - digitaltwins_id: 数字孪生场景唯一标识（如 DT20260101），通过 match_scenario 获取
     - indicators: 需要对比的根因指标列表，如 ["RSRP均值(dBm)", "SINR均值(dB)"]
       可选指标: RSRP均值(dBm), SINR均值(dB), MR覆盖率(%), RRC连接成功率(%)
+    - chart_type: 图表类型，根据数据特征和用户需求选择最合适的类型
+      可选值: grouped_bar_chart(分组柱状图,默认), line_chart(折线图), stacked_bar_chart(堆叠柱状图), scatter_plot(散点图), heatmap(热力图), table(数据表格)
     """
     # 1. 验证场景
     scenario = next(
@@ -479,8 +500,9 @@ def compare_simulation_data(
     }
 
     # 6. 构建 chart_data JSON
+    resolved_chart_type = chart_type if chart_type in VALID_CHART_TYPES else "grouped_bar_chart"
     chart_data = {
-        "chart_type": "grouped_bar",
+        "chart_type": resolved_chart_type,
         "data": {
             "cells": cells,
             "indicators": valid,
