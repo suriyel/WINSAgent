@@ -9,6 +9,8 @@ import type { ChartPending, ChartMeta } from "../../types";
 
 interface Props {
   chartPending: ChartPending;
+  /** Hide the collapsible header (used when embedded inside DataTable). */
+  embedded?: boolean;
 }
 
 /** Merged advice entry combining backend + AVA recommendations. */
@@ -167,17 +169,21 @@ const DIM_FILTER_MAX = 20;
 // Component
 // ---------------------------------------------------------------------------
 
-export default function AutoChart({ chartPending }: Props) {
+export default function AutoChart({ chartPending, embedded }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
 
   const { rows, chart_type: backendChartType, title, meta: rawMeta } = chartPending;
   const meta: ChartMeta = rawMeta ?? {};
+  const allMeasures = meta.measures ?? [];
 
   const [collapsed, setCollapsed] = useState(false);
   const [renderChartType, setRenderChartType] = useState(
     backendChartType in CHART_TYPE_CONFIGS ? backendChartType : "grouped_bar_chart",
   );
+
+  // Selected measure (for multi-measure datasets)
+  const [selectedMeasure, setSelectedMeasure] = useState<string>(allMeasures[0] ?? "value");
 
   // Dimension filters: dim key → selected values
   const [dimFilters, setDimFilters] = useState<Record<string, Set<string>>>({});
@@ -208,7 +214,14 @@ export default function AutoChart({ chartPending }: Props) {
     setRenderChartType(
       backendChartType in CHART_TYPE_CONFIGS ? backendChartType : "grouped_bar_chart",
     );
-  }, [dimValues, backendChartType]);
+    setSelectedMeasure(allMeasures[0] ?? "value");
+  }, [dimValues, backendChartType, allMeasures]);
+
+  // Effective meta with only the selected measure (for chart builders)
+  const effectiveMeta = useMemo<ChartMeta>(() => ({
+    ...meta,
+    measures: [selectedMeasure],
+  }), [meta, selectedMeasure]);
 
   // Filtered rows
   const filteredRows = useMemo(() => {
@@ -258,12 +271,12 @@ export default function AutoChart({ chartPending }: Props) {
     return list;
   }, [avaAdvices, backendChartType]);
 
-  // Build G2 options for current chart type
+  // Build G2 options using effectiveMeta (single selected measure)
   const chartOptions = useMemo(() => {
     const config = CHART_TYPE_CONFIGS[renderChartType];
     if (!config) return null;
-    return config.buildOptions(filteredRows, meta);
-  }, [renderChartType, filteredRows, meta]);
+    return config.buildOptions(filteredRows, effectiveMeta);
+  }, [renderChartType, filteredRows, effectiveMeta]);
 
   // G2 render
   useEffect(() => {
@@ -299,7 +312,6 @@ export default function AutoChart({ chartPending }: Props) {
       const next = new Set(current);
       if (next.has(val)) {
         next.delete(val);
-        // If empty, re-select all
         if (next.size === 0) return { ...prev, [dim]: new Set(dimValues[dim] ?? []) };
       } else {
         next.add(val);
@@ -311,6 +323,115 @@ export default function AutoChart({ chartPending }: Props) {
   const isTableMode = renderChartType === "table";
   const summary = meta.summary as Record<string, Record<string, number>> | undefined;
   const hasFilters = Object.keys(dimValues).length > 0;
+  const hasMultipleMeasures = allMeasures.length > 1;
+
+  const chartBody = (
+    <div className="px-4 py-3 space-y-3">
+      {/* Chart type switcher */}
+      <div className="flex flex-wrap gap-1.5 text-xs">
+        {mergedAdvices.map((advice) => (
+          <button
+            key={advice.type}
+            onClick={() => setRenderChartType(advice.type)}
+            className={`px-2.5 py-1 rounded-md border transition-colors ${
+              renderChartType === advice.type
+                ? "bg-primary text-white border-primary"
+                : "bg-gray-50 border-gray-200 text-text-secondary hover:border-primary/40"
+            }`}
+          >
+            {advice.label}
+            {advice.isBackend && <span className="ml-1 opacity-70">*</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Measure selector (multi-measure datasets) */}
+      {hasMultipleMeasures && (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-text-secondary font-medium">Y轴指标:</span>
+          {allMeasures.map((m) => (
+            <button
+              key={m}
+              onClick={() => setSelectedMeasure(m)}
+              className={`px-2 py-0.5 rounded-full border transition-colors ${
+                selectedMeasure === m
+                  ? "bg-secondary/15 border-secondary/40 text-secondary"
+                  : "bg-gray-50 border-gray-200 text-text-weak"
+              }`}
+            >
+              {meta.labels?.[m] ?? m}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Dimension filters */}
+      {hasFilters && (
+        <div className="flex flex-wrap gap-3 text-xs">
+          {Object.entries(dimValues).map(([dim, vals]) => (
+            <div key={dim} className="flex items-center gap-1.5">
+              <span className="text-text-secondary font-medium">
+                {meta.labels?.[dim] ?? dim}:
+              </span>
+              {vals.map((val) => (
+                <button
+                  key={val}
+                  onClick={() => toggleDimValue(dim, val)}
+                  className={`px-2 py-0.5 rounded-full border transition-colors ${
+                    (dimFilters[dim] ?? new Set()).has(val)
+                      ? "bg-primary/15 border-primary/40 text-primary"
+                      : "bg-gray-50 border-gray-200 text-text-weak"
+                  }`}
+                >
+                  {val}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Chart / Table / Empty */}
+      {filteredRows.length === 0 ? (
+        <div className="flex items-center justify-center h-40 text-text-weak text-sm">
+          无满足条件的数据
+        </div>
+      ) : isTableMode ? (
+        <GenericTable rows={filteredRows} meta={meta} />
+      ) : chartOptions ? (
+        <div ref={containerRef} className="w-full" style={{ minHeight: 360 }} />
+      ) : (
+        <div className="flex items-center justify-center h-40 text-text-weak text-sm">
+          该图表类型不适用于当前数据
+        </div>
+      )}
+
+      {/* Summary stats (if provided in meta) */}
+      {summary?.avg_improvement && (
+        <div className="flex flex-wrap gap-3 pt-2 border-t border-gray-100">
+          {Object.entries(summary.avg_improvement).map(([ind, value]) => (
+            <div key={ind} className="flex items-center gap-1.5 text-xs">
+              <span className="text-text-secondary">{ind}:</span>
+              <span className={`font-semibold ${value > 0 ? "text-success" : value < 0 ? "text-error" : "text-text-weak"}`}>
+                {value > 0 ? "+" : ""}{value.toFixed(2)}
+              </span>
+              <span className="text-text-weak">均值提升</span>
+            </div>
+          ))}
+          {avaAdvices.length > 0 && (
+            <div className="ml-auto text-xs text-text-weak">
+              AVA 推荐: {CHART_TYPE_CONFIGS[avaAdvices[0].type]?.label ?? avaAdvices[0].type}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // Embedded mode: no collapsible header
+  if (embedded) {
+    return <div className="rounded-lg border border-primary/20 bg-white overflow-hidden">{chartBody}</div>;
+  }
 
   return (
     <div className="rounded-lg border border-primary/30 bg-white overflow-hidden">
@@ -334,88 +455,7 @@ export default function AutoChart({ chartPending }: Props) {
         </svg>
       </div>
 
-      {!collapsed && (
-        <div className="px-4 py-3 space-y-3">
-          {/* Chart type switcher */}
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            {mergedAdvices.map((advice) => (
-              <button
-                key={advice.type}
-                onClick={() => setRenderChartType(advice.type)}
-                className={`px-2.5 py-1 rounded-md border transition-colors ${
-                  renderChartType === advice.type
-                    ? "bg-primary text-white border-primary"
-                    : "bg-gray-50 border-gray-200 text-text-secondary hover:border-primary/40"
-                }`}
-              >
-                {advice.label}
-                {advice.isBackend && <span className="ml-1 opacity-70">*</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* Dimension filters */}
-          {hasFilters && (
-            <div className="flex flex-wrap gap-3 text-xs">
-              {Object.entries(dimValues).map(([dim, vals]) => (
-                <div key={dim} className="flex items-center gap-1.5">
-                  <span className="text-text-secondary font-medium">
-                    {meta.labels?.[dim] ?? dim}:
-                  </span>
-                  {vals.map((val) => (
-                    <button
-                      key={val}
-                      onClick={() => toggleDimValue(dim, val)}
-                      className={`px-2 py-0.5 rounded-full border transition-colors ${
-                        (dimFilters[dim] ?? new Set()).has(val)
-                          ? "bg-primary/15 border-primary/40 text-primary"
-                          : "bg-gray-50 border-gray-200 text-text-weak"
-                      }`}
-                    >
-                      {val}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Chart / Table / Empty */}
-          {filteredRows.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-text-weak text-sm">
-              无满足条件的数据
-            </div>
-          ) : isTableMode ? (
-            <GenericTable rows={filteredRows} meta={meta} />
-          ) : chartOptions ? (
-            <div ref={containerRef} className="w-full" style={{ minHeight: 360 }} />
-          ) : (
-            <div className="flex items-center justify-center h-40 text-text-weak text-sm">
-              该图表类型不适用于当前数据
-            </div>
-          )}
-
-          {/* Summary stats (if provided in meta) */}
-          {summary?.avg_improvement && (
-            <div className="flex flex-wrap gap-3 pt-2 border-t border-gray-100">
-              {Object.entries(summary.avg_improvement).map(([ind, value]) => (
-                <div key={ind} className="flex items-center gap-1.5 text-xs">
-                  <span className="text-text-secondary">{ind}:</span>
-                  <span className={`font-semibold ${value > 0 ? "text-success" : value < 0 ? "text-error" : "text-text-weak"}`}>
-                    {value > 0 ? "+" : ""}{value.toFixed(2)}
-                  </span>
-                  <span className="text-text-weak">均值提升</span>
-                </div>
-              ))}
-              {avaAdvices.length > 0 && (
-                <div className="ml-auto text-xs text-text-weak">
-                  AVA 推荐: {CHART_TYPE_CONFIGS[avaAdvices[0].type]?.label ?? avaAdvices[0].type}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {!collapsed && chartBody}
     </div>
   );
 }

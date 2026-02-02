@@ -9,8 +9,13 @@ interface Props {
 }
 
 const ROWS_PER_PAGE = 10;
-/** Minimum number of numeric columns required to show the chart toggle. */
-const MIN_NUMERIC_COLS = 1;
+
+/**
+ * Column names that should be excluded from chartable measures
+ * (coordinates, IDs that look numeric, etc.).
+ */
+const EXCLUDED_MEASURE_PATTERN =
+  /^(longitude|latitude|lon|lat|经度|纬度|lng|x坐标|y坐标)$/i;
 
 /** Convert TableData (headers + string[][]) to flat rows for AutoChart. */
 function tableToChartPending(table: TableData): ChartPending | null {
@@ -18,18 +23,18 @@ function tableToChartPending(table: TableData): ChartPending | null {
 
   // Detect which columns are numeric by sampling up to 20 rows
   const sampleSize = Math.min(table.rows.length, 20);
-  const numericCols: Set<number> = new Set();
+  const numericCols = new Set<number>();
   for (let ci = 0; ci < table.headers.length; ci++) {
-    let isNumeric = true;
+    let allNumeric = true;
+    let hasValue = false;
     for (let ri = 0; ri < sampleSize; ri++) {
       const val = table.rows[ri]?.[ci]?.trim() ?? "";
       if (val === "") continue;
-      if (isNaN(Number(val))) { isNumeric = false; break; }
+      hasValue = true;
+      if (isNaN(Number(val))) { allNumeric = false; break; }
     }
-    if (isNumeric) numericCols.add(ci);
+    if (allNumeric && hasValue) numericCols.add(ci);
   }
-
-  if (numericCols.size < MIN_NUMERIC_COLS) return null;
 
   const dimensions: string[] = [];
   const measures: string[] = [];
@@ -38,17 +43,28 @@ function tableToChartPending(table: TableData): ChartPending | null {
   for (let ci = 0; ci < table.headers.length; ci++) {
     const key = table.headers[ci];
     labels[key] = key;
+
     if (numericCols.has(ci)) {
+      // Exclude coordinate-like columns from measures
+      if (EXCLUDED_MEASURE_PATTERN.test(key)) {
+        // Don't add to dimensions either — too many unique values
+        continue;
+      }
       measures.push(key);
     } else {
       dimensions.push(key);
     }
   }
 
+  // Need at least 1 dimension + 1 measure to be chartable
+  if (measures.length < 1 || dimensions.length < 1) return null;
+
   const rows: Record<string, unknown>[] = table.rows.map((row) => {
     const obj: Record<string, unknown> = {};
     for (let ci = 0; ci < table.headers.length; ci++) {
       const key = table.headers[ci];
+      // Skip excluded columns
+      if (numericCols.has(ci) && EXCLUDED_MEASURE_PATTERN.test(key)) continue;
       const raw = row[ci] ?? "";
       obj[key] = numericCols.has(ci) ? Number(raw) || 0 : raw;
     }
@@ -65,7 +81,7 @@ function tableToChartPending(table: TableData): ChartPending | null {
 
 export default function DataTable({ table, tableIndex = 0 }: Props) {
   const [currentPage, setCurrentPage] = useState(0);
-  const [showChart, setShowChart] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "chart">("table");
 
   const totalPages = Math.ceil(table.rows.length / ROWS_PER_PAGE);
   const startIdx = currentPage * ROWS_PER_PAGE;
@@ -92,48 +108,60 @@ export default function DataTable({ table, tableIndex = 0 }: Props) {
 
   return (
     <div className="mt-2 space-y-2">
-      {/* 元信息 + 操作按钮 */}
-      <div className="flex items-center justify-between text-xs text-text-weak">
-        <span>共 {table.total_rows} 条记录</span>
-        <div className="flex items-center gap-1.5">
+      {/* Tab bar + actions */}
+      <div className="flex items-center text-xs">
+        {/* View mode tabs */}
+        <div className="flex items-center border-b border-gray-100">
+          <button
+            onClick={() => setViewMode("table")}
+            className={`px-3 py-1.5 font-medium border-b-2 transition-colors ${
+              viewMode === "table"
+                ? "border-primary text-primary"
+                : "border-transparent text-text-weak hover:text-text-secondary"
+            }`}
+          >
+            <svg className="w-3.5 h-3.5 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 6h18M3 14h18M3 18h18" />
+            </svg>
+            表格
+          </button>
           {chartPending && (
             <button
-              onClick={() => setShowChart((v) => !v)}
-              className={`px-2 py-0.5 rounded border transition-colors ${
-                showChart
-                  ? "bg-primary/15 border-primary/40 text-primary"
-                  : "border-gray-200 hover:bg-gray-50"
+              onClick={() => setViewMode("chart")}
+              className={`px-3 py-1.5 font-medium border-b-2 transition-colors ${
+                viewMode === "chart"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-text-weak hover:text-text-secondary"
               }`}
-              title={showChart ? "切换到表格" : "切换到图表"}
             >
-              {showChart ? (
-                <svg className="w-3.5 h-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 6h18M3 14h18M3 18h18" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              )}
+              <svg className="w-3.5 h-3.5 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              图表
             </button>
           )}
-          <button
-            onClick={handleExportCSV}
-            className="px-2 py-0.5 rounded border border-gray-200 hover:bg-gray-50 transition-colors"
-          >
-            导出 CSV
-          </button>
         </div>
+
+        <div className="flex-1" />
+
+        {/* Meta + export */}
+        <span className="text-text-weak mr-2">共 {table.total_rows} 条</span>
+        <button
+          onClick={handleExportCSV}
+          className="px-2 py-0.5 rounded border border-gray-200 hover:bg-gray-50 transition-colors text-text-weak"
+        >
+          导出 CSV
+        </button>
       </div>
 
       {/* Chart view */}
-      {showChart && chartPending ? (
+      {viewMode === "chart" && chartPending ? (
         <Suspense fallback={<div className="h-40 flex items-center justify-center text-sm text-text-weak">加载图表...</div>}>
-          <AutoChart chartPending={chartPending} />
+          <AutoChart chartPending={chartPending} embedded />
         </Suspense>
       ) : (
         <>
-          {/* 表格 */}
+          {/* Table view */}
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs border-collapse">
               <thead>
@@ -168,7 +196,7 @@ export default function DataTable({ table, tableIndex = 0 }: Props) {
             </table>
           </div>
 
-          {/* 分页 */}
+          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 text-xs">
               <button
