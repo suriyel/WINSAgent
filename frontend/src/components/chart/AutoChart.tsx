@@ -256,20 +256,24 @@ export default function AutoChart({ chartPending, embedded }: Props) {
     }
   }, [filteredRows]);
 
-  // Merged advices: backend first, then AVA, then remaining types
+  // Merged advices: backend first, then AVA, then remaining types.
+  // Only include types that are applicable to the current data.
   const mergedAdvices = useMemo(() => {
     const seen = new Set<string>();
     const list: MergedAdvice[] = [];
     const add = (type: string, score: number, isBackend: boolean) => {
       if (seen.has(type) || !(type in CHART_TYPE_CONFIGS)) return;
+      const config = CHART_TYPE_CONFIGS[type];
+      // "table" always applicable; others must produce non-null options
+      if (type !== "table" && config.buildOptions(filteredRows, effectiveMeta) === null) return;
       seen.add(type);
-      list.push({ type, label: CHART_TYPE_CONFIGS[type].label, score, isBackend });
+      list.push({ type, label: config.label, score, isBackend });
     };
     add(backendChartType, 100, true);
     for (const a of avaAdvices) add(a.type, a.score, false);
     for (const t of SUPPORTED_CHART_TYPES) add(t, 0, false);
     return list;
-  }, [avaAdvices, backendChartType]);
+  }, [avaAdvices, backendChartType, filteredRows, effectiveMeta]);
 
   // Build G2 options using effectiveMeta (single selected measure)
   const chartOptions = useMemo(() => {
