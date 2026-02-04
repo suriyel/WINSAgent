@@ -132,6 +132,73 @@ function ArrayInput({
 }
 
 // ---------------------------------------------------------------------------
+// DateTimeInput: renders a datetime picker with optional min/max constraints
+// Format: YYYY-MM-DD HH:MM (精确到分钟)
+// ---------------------------------------------------------------------------
+
+/** Convert user format (YYYY-MM-DD HH:MM) to HTML5 datetime-local format (YYYY-MM-DDTHH:MM) */
+function toInputFormat(value: string): string {
+  if (!value) return "";
+  return value.replace(" ", "T");
+}
+
+/** Convert HTML5 datetime-local format to user format (YYYY-MM-DD HH:MM) */
+function toUserFormat(value: string): string {
+  if (!value) return "";
+  return value.replace("T", " ");
+}
+
+function DateTimeInput({
+  value,
+  schema,
+  onChange,
+  isMissing,
+}: {
+  value: string;
+  schema?: ParamSchema;
+  onChange: (value: string) => void;
+  isMissing: boolean;
+}) {
+  // 从 ui_config 读取日期时间范围限制（不暴露给 LLM）
+  const minDateTime = schema?.ui_config?.minDateTime;
+  const maxDateTime = schema?.ui_config?.maxDateTime;
+
+  const borderCls = isMissing
+    ? "border-blue-300 bg-white"
+    : "border-gray-200 bg-gray-50";
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="datetime-local"
+        className={`flex-1 rounded-lg border px-3 py-2 text-sm text-text-primary
+          focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary
+          transition-shadow ${borderCls}`}
+        value={toInputFormat(value)}
+        min={toInputFormat(minDateTime || "")}
+        max={toInputFormat(maxDateTime || "")}
+        step="60"
+        onChange={(e) => onChange(toUserFormat(e.target.value))}
+      />
+      {(minDateTime || maxDateTime) && (
+        <span className="text-xs text-text-weak whitespace-nowrap">
+          {minDateTime && maxDateTime
+            ? `${minDateTime} ~ ${maxDateTime}`
+            : minDateTime
+            ? `>= ${minDateTime}`
+            : `<= ${maxDateTime}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Check if schema declares a datetime-local format. */
+function isDateTimeSchema(schema?: ParamSchema): boolean {
+  return schema?.format === "datetime-local";
+}
+
+// ---------------------------------------------------------------------------
 // ParamsInlineCard
 // ---------------------------------------------------------------------------
 export default function ParamsInlineCard({ paramsPending }: Props) {
@@ -220,6 +287,7 @@ export default function ParamsInlineCard({ paramsPending }: Props) {
           const desc = schema?.description;
           const placeholder = schema?.placeholder || "";
           const isArray = isArraySchema(schema);
+          const isDateTime = isDateTimeSchema(schema);
 
           return (
             <div key={key}>
@@ -237,6 +305,13 @@ export default function ParamsInlineCard({ paramsPending }: Props) {
                   items={Array.isArray(value) ? value : coerceToArray(value, schema)}
                   schema={schema}
                   onChange={(items) => handleArrayChange(key, items)}
+                  isMissing={isMissing}
+                />
+              ) : isDateTime ? (
+                <DateTimeInput
+                  value={String(value ?? "")}
+                  schema={schema}
+                  onChange={(v) => handleScalarChange(key, v)}
                   isMissing={isMissing}
                 />
               ) : (

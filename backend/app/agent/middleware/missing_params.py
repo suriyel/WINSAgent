@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
 import uuid
 from typing import Any
 
+from jinja2 import Environment, BaseLoader, UndefinedError
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage
@@ -21,6 +23,94 @@ from langgraph.typing import ContextT
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+# Jinja2 环境，用于渲染 ui_config 中的模板
+_jinja_env = Environment(loader=BaseLoader())
+
+
+def _render_template(template_str: str, context: dict[str, Any]) -> str | None:
+    """渲染 Jinja2 模板字符串.
+
+    Args:
+        template_str: 模板字符串，如 "{{ scenario_start_time }}"
+        context: 渲染上下文（通常是 AgentState 的字段）
+
+    Returns:
+        渲染后的字符串，如果模板变量不存在或渲染失败则返回 None
+    """
+    if not template_str or "{{" not in template_str:
+        return template_str
+
+    try:
+        template = _jinja_env.from_string(template_str)
+        result = template.render(**context)
+        # 如果结果为空字符串或只包含空白，返回 None
+        if not result or not result.strip():
+            return None
+        return result.strip()
+    except UndefinedError:
+        logger.debug(f"Jinja2 模板变量未定义: {template_str}")
+        return None
+    except Exception as e:
+        logger.warning(f"Jinja2 模板渲染失败: {template_str}, 错误: {e}")
+        return None
+
+
+def _render_ui_config(
+    ui_config: dict[str, Any] | None,
+    context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """渲染 ui_config 中的 Jinja2 模板.
+
+    Args:
+        ui_config: UI 配置字典，值可能包含 Jinja2 模板
+        context: 渲染上下文
+
+    Returns:
+        渲染后的 ui_config，模板变量不存在的字段会被移除
+    """
+    if not ui_config:
+        return None
+
+    rendered = {}
+    for key, value in ui_config.items():
+        if isinstance(value, str):
+            rendered_value = _render_template(value, context)
+            if rendered_value is not None:
+                rendered[key] = rendered_value
+        else:
+            rendered[key] = value
+
+    return rendered if rendered else None
+
+
+def _render_params_schema(
+    params_schema: dict[str, "ParamSchema"],
+    state: AgentState,
+) -> dict[str, "ParamSchema"]:
+    """渲染 params_schema 中所有 ui_config 的 Jinja2 模板.
+
+    Args:
+        params_schema: 参数 schema 字典
+        state: AgentState，用作渲染上下文
+
+    Returns:
+        渲染后的 params_schema（深拷贝，不修改原始对象）
+    """
+    # 构建渲染上下文：state 的所有字段
+    context = dict(state) if state else {}
+
+    result = {}
+    for param_name, schema in params_schema.items():
+        if schema.ui_config:
+            # 深拷贝 schema 并渲染 ui_config
+            schema_copy = schema.model_copy(deep=True)
+            schema_copy.ui_config = _render_ui_config(schema.ui_config, context)
+            result[param_name] = schema_copy
+        else:
+            result[param_name] = schema
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +178,12 @@ class ParamSchema(BaseModel):
 
     # 扩展元数据
     placeholder: str | None = Field(default=None, description="输入框占位提示")
+
+    # UI 控件专用配置（不暴露给 LLM，仅传递给前端控件）
+    ui_config: dict[str, Any] | None = Field(
+        default=None,
+        description="前端控件专用配置，如 datetime 的 minDateTime/maxDateTime",
+    )
 
     def is_required(self) -> bool:
         """判断参数是否必填.
@@ -221,13 +317,16 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState, ContextT]):
 
         tool_call_id = str(uuid.uuid4())
 
+        # 渲染 ui_config 中的 Jinja2 模板（使用 state 作为上下文）
+        rendered_schema = _render_params_schema(params_schema, state)
+
         info = MissingParamsInfo(
             tool_name=tool_name,
             tool_call_id=tool_call_id,
             description=f"{self._description_prefix}: {tool_name}",
             current_params=known_params,
             missing_params=missing,
-            params_schema=params_schema,
+            params_schema=rendered_schema,
         )
 
         logger.info(
@@ -325,6 +424,9 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState, ContextT]):
         if not missing:
             return None
 
+        # 渲染 ui_config 中的 Jinja2 模板（使用 state 作为上下文）
+        rendered_schema = _render_params_schema(params_schema, state)
+
         # 构建缺省参数信息
         info = MissingParamsInfo(
             tool_name=tool_name,
@@ -332,7 +434,7 @@ class MissingParamsMiddleware(AgentMiddleware[MissingParamsState, ContextT]):
             description=f"{self._description_prefix}: {tool_name}",
             current_params=tool_args,
             missing_params=missing,
-            params_schema=params_schema,
+            params_schema=rendered_schema,
         )
 
         logger.info(
@@ -616,14 +718,56 @@ def datetime_param(
     default: str | None = None,
     *,
     required: bool = True,
+    min_datetime: str | None = None,
+    max_datetime: str | None = None,
+    placeholder: str | None = None,
 ) -> ParamSchema:
-    """创建日期时间类型参数 schema."""
+    """创建日期时间类型参数 schema.
+
+    Args:
+        title: 表单字段标签
+        description: 帮助文本/提示
+        default: 默认值，格式 YYYY-MM-DD HH:MM (如 "2024-01-15 09:30")
+        required: 是否必填
+        min_datetime: 最小可选日期时间，格式 YYYY-MM-DD HH:MM（仅传给前端控件，不暴露给 LLM）。
+            支持 Jinja2 模板占位符，如 "{{ scenario_start_time }}"，
+            将在运行时从 AgentState 中获取对应字段值进行替换。
+            若模板变量不存在，则该约束不生效（值为 None）。
+        max_datetime: 最大可选日期时间，格式 YYYY-MM-DD HH:MM（仅传给前端控件，不暴露给 LLM）。
+            支持 Jinja2 模板占位符，用法同 min_datetime。
+        placeholder: 输入框占位提示
+
+    Returns:
+        ParamSchema: 日期时间类型参数 schema，前端将渲染日期时间选择控件（精确到分钟）
+
+    Example:
+        >>> # 静态范围
+        >>> datetime_param(title="开始时间", min_datetime="2024-01-01 00:00")
+        >>>
+        >>> # 动态范围（从 AgentState 获取）
+        >>> datetime_param(
+        ...     title="选择时间",
+        ...     min_datetime="{{ scenario_start_time }}",
+        ...     max_datetime="{{ scenario_end_time }}",
+        ... )
+    """
+    # 构建 UI 专用配置（不暴露给 LLM）
+    ui_config: dict[str, Any] | None = None
+    if min_datetime or max_datetime:
+        ui_config = {}
+        if min_datetime:
+            ui_config["minDateTime"] = min_datetime
+        if max_datetime:
+            ui_config["maxDateTime"] = max_datetime
+
     return ParamSchema(
         type="string" if required else ["string", "null"],
         title=title,
         description=description,
         default=default,
-        format="date-time",
+        format="datetime-local",
+        placeholder=placeholder or "YYYY-MM-DD HH:MM",
+        ui_config=ui_config,
     )
 
 
@@ -668,3 +812,5 @@ def multiline_param(
         format="multiline",
         placeholder=placeholder,
     )
+
+

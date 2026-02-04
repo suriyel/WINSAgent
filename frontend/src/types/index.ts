@@ -108,6 +108,13 @@ export interface ParamSchema {
   section?: string;
   const?: unknown;
   placeholder?: string;
+
+  // UI 控件专用配置（不暴露给 LLM，仅用于前端控件渲染）
+  ui_config?: {
+    minDateTime?: string;  // datetime-local 最小日期时间
+    maxDateTime?: string;  // datetime-local 最大日期时间
+    [key: string]: unknown;
+  };
 }
 
 /** 缺省参数待填写 - 由 MissingParamsMiddleware 触发 */

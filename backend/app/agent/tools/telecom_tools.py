@@ -11,6 +11,7 @@ import random
 
 from langchain.tools import tool
 
+from app.agent.middleware.missing_params import param_edit, datetime_param, string_param
 from app.agent.tools.registry import tool_registry
 
 
@@ -274,12 +275,28 @@ def _format_table(rows: list[dict]) -> str:
 # Tool 1: match_scenario (查询类，无HITL)
 # ---------------------------------------------------------------------------
 
+@param_edit({
+    "query_time": datetime_param(
+        title="选择查询场景的创建时间",
+        description="选择查询场景的创建时间",
+        required=True,
+        min_datetime="{{ scenario_start_time }}",
+        max_datetime="{{ scenario_end_time }}"
+    ),
+    "description": string_param(
+        title="用户描述的区域名称、问题类型等关键词",
+        description="""
+        用户描述的区域名称、问题类型等关键词""",
+        placeholder="朝阳区弱覆盖",
+    )
+})
 @tool
-def match_scenario(description: str) -> str:
-    """根据用户描述的区域和问题类型，匹配对应的数字孪生仿真场景。
+def match_scenario(query_time:str,description: str) -> str:
+    """根据用户选择查询场景的创建时间和描述的区域、问题类型，匹配对应的数字孪生仿真场景。
     返回匹配的场景信息，包含 digitaltwinsId 用于后续根因分析和优化仿真查询。
 
     参数说明：
+    - query_time: 选择查询场景的创建时间 格式为YYYY-MM-DD hh:mm. **不可乱编必须从上下文中获取**
     - description: 用户描述的区域名称、问题类型等关键词（如"朝阳区弱覆盖"）
     """
     desc_lower = description.lower()
