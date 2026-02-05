@@ -15,6 +15,7 @@ from app.agent.middleware.missing_params import (
     array_param,
     multiline_param,
 )
+from app.agent.middleware.skill import SkillMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "MissingParamsMiddleware",
     "MissingParamsInfo",
     "ParamSchema",
+    "SkillMiddleware",
     # Helper functions for creating param schemas
     "string_param",
     "number_param",

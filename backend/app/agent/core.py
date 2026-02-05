@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import logging
-
 from langchain.agents.middleware import ContextEditingMiddleware, ClearToolUsesEdit
+from langgraph.store.memory import InMemoryStore
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
-
+from langchain_core.callbacks import BaseCallbackHandler
 from app.agent.middleware.chart_data import ChartDataMiddleware
 from app.agent.middleware.data_table import DataTableMiddleware
 from app.agent.middleware.missing_params import MissingParamsMiddleware
+from app.agent.middleware.skill import SkillMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
+from app.agent.prompts.base_prompt import BASE_SYSTEM_PROMPT
 from app.agent.subagents import SubAgentMiddleware
 from app.agent.subagents.agents.todo_tracker import TODO_TRACKER_CONFIG
 from app.agent.tools.telecom_tools import register_telecom_tools
@@ -20,103 +21,38 @@ from app.agent.tools.hil import CustomHumanInTheLoopMiddleware
 from app.agent.tools.knowledge import register_knowledge_tools
 from app.agent.tools.registry import tool_registry
 from app.config import settings
+import json
+import logging
 
-logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """\
-你是 WINS Agent 工作台的智能助手，专注于通信网络优化仿真场景。你的核心职责是：
-
-1. **理解用户意图**：准确识别用户关注的网络问题类型（弱覆盖、干扰、容量、切换等），确定需要查询的指标。
-2. **领域知识检索**：**必须**在执行任何分析前，先调用 search_terminology 工具查询相关术语和指标定义，再调用 search_design_doc 工具获取对应的分析流程。这两个工具的优先级最高。
-3. **工具编排**：按照正确的流程顺序调用工具：
-   - 第一步：调用 search_terminology 和 search_design_doc 获取领域知识
-   - 第二步：调用 match_scenario 匹配场景获取 digitaltwinsId
-   - 第三步：调用 query_root_cause_analysis 查询根因分析结果
-   - 第四步：**必须**输出固定提示语（见下方规则）
-   - 第五步：如用户确认需要优化，调用 query_simulation_results 查询仿真结果
-   - 第六步（可选）：如用户需要直观对比，调用 compare_simulation_data 生成可视化对比图表
-4. **指标选择**：根据用户意图和检索到的术语定义，**只查询相关指标**，不要查询全部指标。例如：
-   - 用户问"弱覆盖" → 查询 RSRP、MR覆盖率、覆盖电平等相关指标
-   - 用户问"干扰" → 查询 SINR、RSRQ、重叠覆盖度等相关指标
-   - 用户问"容量" → 查询 PRB利用率、下行流量、用户数等相关指标
-
-## 根因分析后的固定提示（必须遵守）
-
-在展示根因分析结果后，你**必须**输出以下固定提示语（一字不差）：
-
-**"根因分析完成。是否需要对该场景进行优化仿真？"**
-
-这条提示语不可省略、不可修改、不可替换。
-
-## 分析粒度
-
-每次分析需要考虑两种粒度：
-- **小区级(cell)**：以基站小区为最小分析单元，包含小区id、经纬度和小区级指标
-- **栅格级(grid)**：以地理栅格为最小分析单元，包含经纬度和栅格级指标
-
-根据 search_design_doc 返回的流程文档，确定应该执行小区级分析、栅格级分析，还是两者都执行。
-
-## 缺省参数处理
-
-当你准备调用工具但发现某些必填参数无法通过上下文或查询工具获得时：
-   - **务必**先尝试使用查询工具获取参数值
-   - 仍无法确定的参数，**只能**让用户提供，**必须**使用以下格式：
-```params_request
-{
-  "tool_name": "工具名称",
-  "known_params": {"已确定的参数名": "值"},
-  "missing_params": ["缺失参数1", "缺失参数2"]
-}
-```
-- **数组类型参数**的值必须使用 JSON 数组格式，如 `["RSRP均值(dBm)", "MR覆盖率(%)"]`
-- **绝对不要**通过对话文本向用户询问参数值，必须使用上述格式
-
-## 图表类型选择
-
-当调用 compare_simulation_data 工具时，请根据数据特征和用户需求从以下列表中选择最合适的图表类型作为 chart_type 参数：
-- grouped_bar_chart: 分组柱状图 - 适用于分组对比分析，展示优化前后指标的直观对比（默认推荐）
-- line_chart: 折线图 - 适用于展示指标随小区变化的趋势对比
-- stacked_bar_chart: 堆叠柱状图 - 适用于展示优化前后指标叠加的总量对比
-- scatter_plot: 散点图 - 适用于探索优化前后数值关系、检测异常小区
-- heatmap: 热力图 - 适用于大规模数据集的差值分布可视化
-- table: 数据表格 - 适用于需要查看精确数值的场景
-
-如果无法确定最合适的类型，使用 grouped_bar_chart 作为默认值。
-
-## 注意事项
-
-- 工具调用失败时，整个任务终止，不要重试
-- 始终用中文回复用户
-- 展示分析结果时，简要总结关键发现
-
-## 建议回复选项
-
-在每次回复结束时，你应该提供 2-4 个建议的快捷回复选项，帮助用户快速选择下一步操作。使用以下格式：
-
-**单选模式**（用户只能选择一个）:
-```suggestions
-{
-  "suggestions": [
-    {"text": "选项1文本"},
-    {"text": "选项2文本"},
-    {"text": "选项3文本"}
-  ]
-}
-```
-
-建议选项应该：
-- 与当前对话上下文相关
-- 预测用户可能的下一步操作
-- 使用简洁明确的文字
-- 在根因分析后，提供"是，进行优化仿真"和"否，暂不优化"选项
-"""
+logger = logging.getLogger("llm_logger")
+logger.setLevel(logging.INFO)
+# 控制台
+console = logging.StreamHandler()
+logger.addHandler(console)
 
 # In-memory checkpointer for dev/validation stage
 _checkpointer = InMemorySaver()
+_storage = InMemoryStore()
 
 # Track whether tools have been registered
 _initialized = False
 
+class LLMRequestLogger(BaseCallbackHandler):
+
+    def on_llm_start(self, serialized, prompts, **kwargs):
+        logger.info("====== LLM REQUEST START ======")
+        logger.info("Serialized model: %s", json.dumps(serialized, indent=2, ensure_ascii=False))
+
+        for i, prompt in enumerate(prompts):
+            logger.info("Prompt %d:\n%s", i, prompt)
+
+        if "invocation_params" in kwargs:
+            logger.info(
+                "Invocation params: %s",
+                json.dumps(kwargs["invocation_params"], indent=2, ensure_ascii=False)
+            )
+
+        logger.info("====== LLM REQUEST END ======")
 
 def _ensure_initialized() -> None:
     global _initialized
@@ -135,6 +71,14 @@ def build_agent():
     hitl_config = tool_registry.get_hitl_config()
     param_edit_config = tool_registry.get_param_edit_config()
 
+    # Skill Middleware（动态加载 Skill 内容到 SYSTEM_PROMPT）
+    skill_mw = SkillMiddleware(
+        skills_dir=settings.skills_dir,
+        base_prompt_template=BASE_SYSTEM_PROMPT,
+    )
+    # 注入 select_skill tool
+    all_tools.extend(skill_mw.tools)
+
     # SubAgent Middleware（替代 TodoListMiddleware）
     subagent_mw = SubAgentMiddleware(
         delegated=[],
@@ -144,6 +88,7 @@ def build_agent():
     all_tools.extend(subagent_mw.tools)
 
     middleware = [
+        skill_mw,  # Skill 选择（最高优先级，控制 tools 和 system_prompt）
         subagent_mw,
         DataTableMiddleware(),
         ChartDataMiddleware(),
@@ -151,12 +96,13 @@ def build_agent():
         ContextEditingMiddleware(
             edits=[
                 ClearToolUsesEdit(
-                    trigger= 3000,
+                    trigger=3000,
                     keep=2,
-                    clear_tool_inputs= True,
+                    clear_tool_inputs=True,
                     exclude_tools=[
                         'search_design_doc',
                         'search_terminology',
+                        'select_skill',  # 不清理 Skill 选择记录
                     ],
                     placeholder="[cleared]"
                 ),
@@ -182,20 +128,23 @@ def build_agent():
             )
         )
 
-    # 1. 配置通义千问的 OpenAI 兼容实例
+    # 配置 LLM
     llm = ChatOpenAI(
-        model=settings.llm_model,  # 例如 "qwen-max"
+        model=settings.llm_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,
-        streaming=True
+        streaming=True,
+        callbacks=[LLMRequestLogger()]
     )
 
+    # 使用动态 SYSTEM_PROMPT（通过 SkillMiddleware 的 Jinja2 模板渲染注入 Skill 内容）
     agent = create_agent(
         model=llm,
         tools=all_tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=BASE_SYSTEM_PROMPT,  # Jinja2 模板，运行时由 SkillMiddleware 动态渲染
         middleware=middleware,
         checkpointer=_checkpointer,
+        store=_storage,
     )
     return agent
 

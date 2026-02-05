@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Paths
     knowledge_dir: str = str(Path(__file__).resolve().parent.parent.parent / "knowledge")
     faiss_index_dir: str = str(Path(__file__).resolve().parent.parent / "faiss_indexes")
+    skills_dir: str = str(Path(__file__).resolve().parent.parent.parent / "Skills")
 
     # MySQL (production stage)
     mysql_url: str = ""

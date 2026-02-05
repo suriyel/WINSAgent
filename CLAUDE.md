@@ -61,11 +61,14 @@ User Input → FastAPI /api/chat (SSE) → LangChain Agent → Middleware Stack 
 ```
 
 ### Middleware Stack (execution order in `backend/app/agent/core.py`)
-1. **SubAgentMiddleware** — Manages reactive sub-agents (e.g., TODO tracker) and delegated sub-agents; replaces the original TodoListMiddleware
-2. **SuggestionsMiddleware** — Parses `suggestions` fenced blocks from LLM output into quick-reply chips
-3. **ContextEditingMiddleware** — Clears old tool call/result messages when context exceeds 2000 tokens (keeps last 1)
-4. **MissingParamsMiddleware** — Detects missing required tool parameters, triggers interrupt with a JSON Schema form for the user to fill (conditional: only added when tools have `param_edit_schema`)
-5. **CustomHumanInTheLoopMiddleware** — Interrupts execution for tools marked `requires_hitl` (conditional: only added when tools have HITL config)
+1. **SkillMiddleware** — Dynamically loads Skill content into SYSTEM_PROMPT via `wrap_model_call`; controls `select_skill` tool visibility based on message type and task state
+2. **SubAgentMiddleware** — Manages reactive sub-agents (e.g., TODO tracker) and delegated sub-agents; replaces the original TodoListMiddleware
+3. **DataTableMiddleware** — Parses data table blocks from tool results
+4. **ChartDataMiddleware** — Parses chart data blocks from tool results
+5. **SuggestionsMiddleware** — Parses `suggestions` fenced blocks from LLM output into quick-reply chips
+6. **ContextEditingMiddleware** — Clears old tool call/result messages when context exceeds 3000 tokens (keeps last 2)
+7. **MissingParamsMiddleware** — Detects missing required tool parameters, triggers interrupt with a JSON Schema form for the user to fill (conditional: only added when tools have `param_edit_schema`)
+8. **CustomHumanInTheLoopMiddleware** — Interrupts execution for tools marked `requires_hitl` (conditional: only added when tools have HITL config)
 
 ### SubAgent Framework (`backend/app/agent/subagents/`)
 Two patterns for orchestrating sub-agents alongside the main agent:
@@ -77,6 +80,24 @@ Key components:
 - `types.py` — `SubAgentConfig` TypedDict defining config schema
 - `runner.py` — `SubAgentRunner` compiles configs into executable agents, caches LLM instances
 - `middleware.py` — `SubAgentMiddleware` hooks into agent lifecycle, routes reactive triggers and task calls
+
+### Skill System (`/Skills/` + `backend/app/agent/middleware/skill.py`)
+Dynamic SYSTEM_PROMPT management through modular Skill files:
+
+- **Skill files**: Markdown with YAML Front Matter (`name`, `title`, `description`, `triggers`, `priority`)
+- **SkillMiddleware**: Uses `wrap_model_call` hook to dynamically filter tools and render system_prompt via Jinja2
+- **select_skill tool**: Built-in tool for LLM to choose appropriate Skill based on user intent
+- **State management**: `active_skill` and `skill_content` in AgentState
+
+Control logic:
+- HumanMessage + no active Skill/no pending todos → show `select_skill` tool
+- HumanMessage + active Skill + pending todos → hide `select_skill`, reuse current Skill
+- Non-HumanMessage → hide `select_skill`
+
+Key files:
+- `Skills/*.md` — Skill definition files (business workflow content)
+- `backend/app/agent/prompts/base_prompt.py` — Base SYSTEM_PROMPT Jinja2 template
+- `backend/app/agent/middleware/skill.py` — SkillMiddleware implementation
 
 ### Tool System
 Tools are registered in `backend/app/agent/tools/registry.py` with metadata:
@@ -126,7 +147,9 @@ Three-column layout in `App.tsx`:
 |------|---------|
 | `backend/app/main.py` | FastAPI app entry, lifespan init, router registration |
 | `backend/app/config.py` | Configuration from `.env` via pydantic-settings |
-| `backend/app/agent/core.py` | Agent builder with system prompt, middleware pipeline, singleton |
+| `backend/app/agent/core.py` | Agent builder with middleware pipeline, singleton |
+| `backend/app/agent/prompts/base_prompt.py` | Base SYSTEM_PROMPT Jinja2 template |
+| `backend/app/agent/middleware/skill.py` | SkillMiddleware — dynamic Skill loading and system_prompt rendering |
 | `backend/app/agent/tools/registry.py` | Central tool registry with metadata |
 | `backend/app/agent/tools/telecom_tools.py` | Telecom domain tools (scenario, RCA, simulation) |
 | `backend/app/agent/tools/knowledge.py` | Knowledge retrieval tools (terminology, design docs) |
@@ -167,6 +190,7 @@ Backend config in `backend/app/config.py` loaded from `.env`:
 - `SUBAGENT_MODEL` — Optional, separate model for sub-agents (defaults to `LLM_MODEL`)
 - `KNOWLEDGE_DIR` — Path to knowledge markdown files (default: `../knowledge`)
 - `FAISS_INDEX_DIR` — Path to persist FAISS indexes (default: `./faiss_indexes`)
+- `SKILLS_DIR` — Path to Skill markdown files (default: `../Skills`)
 - `MYSQL_URL` — MySQL connection string (configured but not yet integrated)
 - `CORS_ORIGINS` — Allowed CORS origins (default: `http://localhost:3000,http://localhost:5173`)
 
