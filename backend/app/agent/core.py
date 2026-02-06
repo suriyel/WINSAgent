@@ -14,6 +14,7 @@ from app.agent.middleware.missing_params import MissingParamsMiddleware
 from app.agent.middleware.skill import SkillMiddleware
 from app.agent.middleware.suggestions import SuggestionsMiddleware
 from app.agent.prompts.base_prompt import BASE_SYSTEM_PROMPT
+from app.agent.state import WINSAgentState
 from app.agent.subagents import SubAgentMiddleware
 from app.agent.subagents.agents.todo_tracker import TODO_TRACKER_CONFIG
 from app.agent.tools.telecom_tools import register_telecom_tools
@@ -87,12 +88,17 @@ def build_agent():
     # 注入 task() tool（如有委派式子 Agent）
     all_tools.extend(subagent_mw.tools)
 
+    # 话术模板 Middleware（提供 add_speech_template tool）
+    suggestions_mw = SuggestionsMiddleware()
+    # 注入 add_speech_template tool
+    all_tools.extend(suggestions_mw.tools)
+
     middleware = [
         skill_mw,  # Skill 选择（最高优先级，控制 tools 和 system_prompt）
         subagent_mw,
         DataTableMiddleware(),
         ChartDataMiddleware(),
-        SuggestionsMiddleware(),
+        suggestions_mw,  # 话术模板（使用实例而非类）
         ContextEditingMiddleware(
             edits=[
                 ClearToolUsesEdit(
@@ -142,9 +148,10 @@ def build_agent():
         model=llm,
         tools=all_tools,
         system_prompt=BASE_SYSTEM_PROMPT,  # Jinja2 模板，运行时由 SkillMiddleware 动态渲染
+        state_schema=WINSAgentState,  # 统一状态 Schema，整合所有 Middleware 状态
         middleware=middleware,
         checkpointer=_checkpointer,
-        store=_storage,
+        store=_storage
     )
     return agent
 

@@ -157,14 +157,15 @@ async def map_agent_stream_to_sse(
                         ] if isinstance(todos, list) else [],
                     })
 
-                # Suggestions state updates (from SuggestionsMiddleware)
+                # 话术模板状态更新 (from SuggestionsMiddleware add_speech_template tool)
                 if "suggestions" in val and val["suggestions"] is not None:
                     suggestions_data = val["suggestions"]
                     # Handle both Pydantic model and dict
                     if hasattr(suggestions_data, "model_dump"):
                         suggestions_data = suggestions_data.model_dump()
+
                     yield _sse("suggestions", {
-                        "suggestions": suggestions_data.get("suggestions", []),
+                        "suggestions": suggestions_data.get("options", []),
                         "multi_select": suggestions_data.get("multi_select", False),
                         "prompt": suggestions_data.get("prompt"),
                     })
