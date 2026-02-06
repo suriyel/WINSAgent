@@ -16,15 +16,16 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Union, Awaitable
+from typing import Any, Callable, Union, Awaitable
 
 import yaml
 from jinja2 import Environment, BaseLoader
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
-from langchain.agents.middleware.types import ModelCallResult
+from langchain.agents.middleware.types import ModelCallResult, AgentState
 from langchain.messages import ToolMessage
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
