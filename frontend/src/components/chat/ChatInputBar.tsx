@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
+import { useChatStore } from "../../stores/chatStore";
 
 interface Props {
   onSend: (content: string) => void;
@@ -7,6 +8,7 @@ interface Props {
 
 export default function ChatInputBar({ onSend, disabled }: Props) {
   const [input, setInput] = useState("");
+  const pendingTemplate = useChatStore((s) => s.pendingTemplate);
 
   const handleSend = () => {
     const text = input.trim();
@@ -31,7 +33,7 @@ export default function ChatInputBar({ onSend, disabled }: Props) {
                      focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary
                      transition-shadow min-h-[44px] max-h-32"
           rows={1}
-          placeholder="输入消息..."
+          placeholder={pendingTemplate ? "请在上方选择一个选项..." : "输入消息..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -42,7 +44,7 @@ export default function ChatInputBar({ onSend, disabled }: Props) {
           onClick={handleSend}
           disabled={disabled || !input.trim()}
         >
-          {disabled ? "处理中..." : "发送"}
+          {pendingTemplate ? "等待选择" : disabled ? "处理中..." : "发送"}
         </button>
       </div>
     </div>

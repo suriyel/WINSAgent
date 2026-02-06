@@ -28,6 +28,7 @@ export interface Message {
   hitlPending?: HITLPending;
   paramsPending?: ParamsPending;  // 缺省参数待填写
   suggestions?: SuggestionGroup;  // 建议回复选项
+  templatePending?: TemplatePending;  // 话术模板（暂停对话）
   chartPending?: ChartPending;    // 图表对比数据
   isStreaming?: boolean;
   timestamp: number;
@@ -142,6 +143,12 @@ export interface SuggestionGroup {
   prompt?: string;        // 可选的提示文本
 }
 
+/** 话术模板 - 暂停对话等待用户选择 */
+export interface TemplatePending {
+  prompt: string;           // 提示文本
+  options: Suggestion[];    // 选项列表
+}
+
 // --- Generic chart data (for chart.data SSE event) ---
 
 export interface ChartMeta {
@@ -178,6 +185,7 @@ export type SSEEventType =
   | "chart.data"
   | "hitl.pending"
   | "params.pending"
+  | "template.pending"
   | "todo.state"
   | "message"
   | "suggestions"

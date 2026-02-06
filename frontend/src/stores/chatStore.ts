@@ -14,6 +14,7 @@ import type {
   Suggestion,
   SuggestionGroup,
   TableData,
+  TemplatePending,
   TodoStep,
   ToolCallInfo,
 } from "../types";
@@ -41,6 +42,9 @@ interface ChatState {
   // Missing params pending (for MissingParamsMiddleware)
   pendingParams: ParamsPending | null;
 
+  // Template pending (话术模板，暂停对话等待用户选择)
+  pendingTemplate: TemplatePending | null;
+
   // Active SSE controller
   _sseController: AbortController | null;
 
@@ -67,6 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   todoSteps: {},
   pendingHITL: null,
   pendingParams: null,
+  pendingTemplate: null,
   _sseController: null,
 
   setActiveConversation(id: string) {
@@ -96,11 +101,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: Date.now(),
     };
 
+    // 如果是从话术模板选择发送的消息，清除最后一条消息的 templatePending
+    const updatedMessages = [...state.messages];
+    if (state.pendingTemplate && updatedMessages.length > 0) {
+      const lastIdx = updatedMessages.length - 1;
+      if (updatedMessages[lastIdx].role === "assistant") {
+        updatedMessages[lastIdx] = { ...updatedMessages[lastIdx], templatePending: undefined };
+      }
+    }
+
     set({
-      messages: [...state.messages, userMsg, assistantMsg],
+      messages: [...updatedMessages, userMsg, assistantMsg],
       isStreaming: true,
       thinkingBuffer: "",
       pendingHITL: null,
+      pendingTemplate: null, // 清除话术模板状态
     });
 
     const controller = connectSSE(
@@ -300,6 +315,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
             msgs[lastIdx] = last;
           }
           return { messages: msgs };
+        }
+
+        case "template.pending": {
+          // 话术模板：暂停对话，等待用户选择
+          const templateData: TemplatePending = {
+            prompt: data.prompt as string,
+            options: data.options as Suggestion[],
+          };
+          // Attach template info to the last assistant message for inline rendering
+          if (last && last.role === "assistant") {
+            last.templatePending = templateData;
+            last.isStreaming = false; // Pause streaming while waiting for template selection
+            msgs[lastIdx] = last;
+          }
+          return {
+            messages: msgs,
+            pendingTemplate: templateData,
+            isStreaming: false, // Pause streaming while waiting for template selection
+          };
         }
 
         case "error": {

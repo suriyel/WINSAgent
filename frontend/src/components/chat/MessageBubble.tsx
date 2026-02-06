@@ -16,10 +16,11 @@ interface Props {
 /** Max number of data rows to display in a table (excluding the header). */
 const TABLE_MAX_ROWS = 10;
 
-/** Strip ```suggestions {...}``` and <suggestions>...</suggestions> blocks from display content. */
+/** Strip ```suggestions {...}```, ```template {...}```, and <suggestions>...</suggestions> blocks from display content. */
 function stripSuggestionsBlock(content: string): string {
   return content
     .replace(/```suggestions\s*\{[\s\S]*?\}\s*```/gi, "")
+    .replace(/```template\s*\{[\s\S]*?\}\s*```/gi, "")
     .replace(/<suggestions>[\s\S]*?<\/suggestions>/gi, "")
     .trim();
 }
@@ -283,8 +284,20 @@ export default function MessageBubble({ message }: Props) {
             ) : null;
           })()}
 
+          {/* Template pending - 话术模板（暂停对话等待选择） */}
+          {message.templatePending && !message.isStreaming && (
+            <SuggestionChips
+              suggestionGroup={{
+                suggestions: message.templatePending.options,
+                multiSelect: false,
+                prompt: message.templatePending.prompt,
+              }}
+              isTemplate={true}
+            />
+          )}
+
           {/* Suggestion chips - 建议选项 */}
-          {message.suggestions && !message.isStreaming && (
+          {message.suggestions && !message.isStreaming && !message.templatePending && (
             <SuggestionChips suggestionGroup={message.suggestions} />
           )}
 

@@ -22,15 +22,16 @@ async def map_agent_stream_to_sse(
     """Consume an agent stream and yield SSE-formatted strings.
 
     Event types emitted:
-      - thinking       : LLM token-level output
-      - tool.call      : Agent decided to call a tool
-      - tool.result    : Tool returned a result
-      - todo.state     : TODO list state updated
-      - hitl.pending   : Human-in-the-Loop approval required
-      - params.pending : Missing parameters need user input (from MissingParamsMiddleware)
-      - suggestions    : Quick reply suggestions (from SuggestionsMiddleware)
-      - message        : Final assistant message
-      - error          : Error occurred
+      - thinking         : LLM token-level output
+      - tool.call        : Agent decided to call a tool
+      - tool.result      : Tool returned a result
+      - todo.state       : TODO list state updated
+      - hitl.pending     : Human-in-the-Loop approval required
+      - params.pending   : Missing parameters need user input (from MissingParamsMiddleware)
+      - suggestions      : Quick reply suggestions (from SuggestionsMiddleware)
+      - template.pending : 话术模板，暂停对话等待用户选择 (from SuggestionsMiddleware)
+      - message          : Final assistant message
+      - error            : Error occurred
     """
 
     try:
@@ -167,6 +168,17 @@ async def map_agent_stream_to_sse(
                         "suggestions": suggestions_data.get("suggestions", []),
                         "multi_select": suggestions_data.get("multi_select", False),
                         "prompt": suggestions_data.get("prompt"),
+                    })
+
+                # Template pending state updates (话术模板，暂停对话)
+                if "template_pending" in val and val["template_pending"] is not None:
+                    template_data = val["template_pending"]
+                    # Handle both Pydantic model and dict
+                    if hasattr(template_data, "model_dump"):
+                        template_data = template_data.model_dump()
+                    yield _sse("template.pending", {
+                        "prompt": template_data.get("prompt", "请选择："),
+                        "options": template_data.get("options", []),
                     })
 
     except Exception as exc:

@@ -4,6 +4,7 @@ import { useChatStore } from "../../stores/chatStore";
 
 interface Props {
   suggestionGroup: SuggestionGroup;
+  isTemplate?: boolean;  // 是否为话术模板模式（暂停对话等待选择）
 }
 
 /**
@@ -13,10 +14,11 @@ interface Props {
  * - 单选：点击即发送
  * - 多选：先选择，再点击"发送"按钮
  */
-export default function SuggestionChips({ suggestionGroup }: Props) {
+export default function SuggestionChips({ suggestionGroup, isTemplate = false }: Props) {
   const { suggestions, multiSelect, prompt } = suggestionGroup;
   const sendMessage = useChatStore((s) => s.sendMessage);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const pendingTemplate = useChatStore((s) => s.pendingTemplate);
 
   // 多选模式下的已选项
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -56,43 +58,52 @@ export default function SuggestionChips({ suggestionGroup }: Props) {
 
   if (!suggestions || suggestions.length === 0) return null;
 
+  // 模板模式下，如果不是当前 pending 的模板，不渲染选项按钮
+  const shouldShowButtons = isTemplate ? !!pendingTemplate : true;
+
   return (
-    <div className="mt-3 space-y-2">
+    <div className={`mt-3 space-y-2 ${isTemplate ? "p-3 rounded-lg bg-primary/5 border border-primary/20" : ""}`}>
       {/* 可选的提示文本 */}
       {prompt && (
-        <p className="text-xs text-text-secondary mb-2">{prompt}</p>
+        <p className={`mb-2 ${isTemplate ? "text-sm font-medium text-text-primary" : "text-xs text-text-secondary"}`}>
+          {prompt}
+        </p>
       )}
 
       {/* 建议选项按钮组 */}
-      <div className="flex flex-wrap gap-2">
-        {suggestions.map((suggestion) => {
-          const isSelected = selected.has(suggestion.id);
-          return (
-            <button
-              key={suggestion.id}
-              onClick={() => handleClick(suggestion.id, suggestion.text, suggestion.value)}
-              disabled={isStreaming}
-              className={`
-                px-3 py-1.5 text-sm rounded-lg border transition-all
-                ${
-                  isSelected
-                    ? "bg-primary text-white border-primary"
-                    : "bg-primary/5 border-primary/20 text-primary hover:bg-primary/10 hover:border-primary/40"
-                }
-                ${isStreaming ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
-                active:scale-95
-              `}
-            >
-              {multiSelect && (
-                <span className="mr-1.5">
-                  {isSelected ? "✓" : "○"}
-                </span>
-              )}
-              {suggestion.text}
-            </button>
-          );
-        })}
-      </div>
+      {shouldShowButtons && (
+        <div className="flex flex-wrap gap-2">
+          {suggestions.map((suggestion) => {
+            const isSelected = selected.has(suggestion.id);
+            return (
+              <button
+                key={suggestion.id}
+                onClick={() => handleClick(suggestion.id, suggestion.text, suggestion.value)}
+                disabled={isStreaming}
+                className={`
+                  px-3 py-1.5 text-sm rounded-lg border transition-all
+                  ${
+                    isSelected
+                      ? "bg-primary text-white border-primary"
+                      : isTemplate
+                        ? "bg-white border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50 shadow-sm"
+                        : "bg-primary/5 border-primary/20 text-primary hover:bg-primary/10 hover:border-primary/40"
+                  }
+                  ${isStreaming ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+                  active:scale-95
+                `}
+              >
+                {multiSelect && (
+                  <span className="mr-1.5">
+                    {isSelected ? "✓" : "○"}
+                  </span>
+                )}
+                {suggestion.text}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* 多选模式下的发送按钮 */}
       {multiSelect && (
