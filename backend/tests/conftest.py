@@ -24,6 +24,24 @@ _mock_settings.llm_model = "test-model"
 _mock_settings.llm_api_key = "sk-test-key"
 _mock_settings.llm_base_url = "http://localhost:11434/v1"
 _mock_settings.subagent_model = ""
+# Corpus settings
+_mock_settings.embedding_model = "text-embedding-v3"
+_mock_settings.embedding_api_key = ""
+_mock_settings.embedding_base_url = ""
+_mock_settings.effective_embedding_api_key = "sk-test-key"
+_mock_settings.effective_embedding_base_url = "http://localhost:11434/v1"
+_mock_settings.reranker_model = "bge-reranker-v2-m3"
+_mock_settings.reranker_base_url = ""
+_mock_settings.reranker_api_key = ""
+_mock_settings.reranker_threshold = 0.3
+_mock_settings.corpus_source_dir = "/tmp/test_corpus_source"
+_mock_settings.corpus_md_dir = "/tmp/test_corpus_md"
+_mock_settings.corpus_image_dir = "/tmp/test_corpus_md/images"
+_mock_settings.corpus_glossary_dir = "/tmp/test_corpus_md/glossary"
+_mock_settings.faiss_index_dir = "/tmp/test_faiss_indexes"
+_mock_settings.knowledge_dir = "/tmp/test_knowledge"
+_mock_settings.terminology_dir = "/tmp/test_knowledge/terminology"
+_mock_settings.design_docs_dir = "/tmp/test_knowledge/design_docs"
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +54,11 @@ def patch_settings(request):
 
     with patch("app.config.settings", _mock_settings):
         with patch("app.agent.subagents.runner.settings", _mock_settings):
-            yield _mock_settings
+            with patch("app.knowledge.vector_store.settings", _mock_settings):
+                with patch("app.knowledge.glossary.settings", _mock_settings):
+                    with patch("app.knowledge.reranker.settings", _mock_settings):
+                        with patch("app.knowledge.pipeline.settings", _mock_settings):
+                            yield _mock_settings
 
 
 # ---------------------------------------------------------------------------

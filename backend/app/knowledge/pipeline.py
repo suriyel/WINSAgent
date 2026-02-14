@@ -90,15 +90,11 @@ class CorpusPipeline:
 
             md_dir.mkdir(parents=True, exist_ok=True)
 
-            # Step 2: Discover source files
+            # Step 2: Discover source files (excludes .md — handled in step 4)
             source_files = self._discover_files(source_dir)
             result.total_files = len(source_files)
 
-            if not source_files:
-                logger.info("No source files found in %s", source_dir)
-                return result
-
-            if on_progress:
+            if on_progress and source_files:
                 on_progress("parsing", 0, result.total_files)
 
             # Step 3: Parse each file

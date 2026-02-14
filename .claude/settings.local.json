@@ -9,7 +9,9 @@
       "Bash(python -m base64:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(dir:*)",
-      "WebFetch(domain:airflow.apache.org)"
+      "WebFetch(domain:airflow.apache.org)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)"
     ]
   }
 }
