@@ -1,4 +1,4 @@
-"""FAISS vector store manager — dual-store for terminology & design docs."""
+"""FAISS vector store manager — dual-store for terminology & design docs + corpus store."""
 
 from __future__ import annotations
 
@@ -18,35 +18,39 @@ logger = logging.getLogger(__name__)
 def _get_embeddings() -> Embeddings:
     """Return the configured embedding model.
 
-    Falls back to a simple fake/deterministic embedding when no API key
-    is available so that the application can still boot for UI development.
+    Uses remote OpenAI-compatible API when API key is available,
+    falls back to FakeEmbeddings for UI development.
     """
-    # if settings.llm_api_key:
-    #     try:
-    #         from langchain_openai import OpenAIEmbeddings
-    #
-    #         return OpenAIEmbeddings(
-    #             model="text-embedding-v3",
-    #             api_key=settings.llm_api_key,
-    #             **({"base_url": settings.llm_base_url} if settings.llm_base_url else {}),
-    #         )
-    #     except Exception:
-    #         logger.warning("OpenAI embeddings unavailable, using fake embeddings")
+    api_key = settings.effective_embedding_api_key
+    base_url = settings.effective_embedding_base_url
+
+    if api_key:
+        try:
+            from langchain_openai import OpenAIEmbeddings
+
+            kwargs = {"model": settings.embedding_model, "api_key": api_key}
+            if base_url:
+                kwargs["base_url"] = base_url
+            return OpenAIEmbeddings(**kwargs)
+        except Exception:
+            logger.warning("OpenAI embeddings unavailable, using fake embeddings")
 
     from langchain_core.embeddings import FakeEmbeddings
     return FakeEmbeddings(size=384)
 
 
 class KnowledgeManager:
-    """Manages two independent FAISS vector stores:
+    """Manages FAISS vector stores:
     - terminology_store  (专业术语表)
     - design_doc_store   (系统设计文档)
+    - corpus_store       (语料库 — 全量构建的异构文档索引)
     """
 
     def __init__(self) -> None:
         self.embeddings: Embeddings | None = None
         self.terminology_store: FAISS | None = None
         self.design_doc_store: FAISS | None = None
+        self.corpus_store: FAISS | None = None
 
     def initialize(self) -> None:
         """Build / load FAISS indexes on application startup."""
@@ -62,6 +66,19 @@ class KnowledgeManager:
             store_name="design_docs",
             doc_dir=settings.design_docs_dir,
         )
+
+        # Load corpus index if it exists (don't auto-build — requires explicit pipeline run)
+        corpus_index_path = index_dir / "corpus"
+        if corpus_index_path.exists():
+            try:
+                self.corpus_store = FAISS.load_local(
+                    str(corpus_index_path),
+                    self.embeddings,
+                    allow_dangerous_deserialization=True,
+                )
+                logger.info("Loaded corpus FAISS index (%d docs)", self.corpus_store.index.ntotal)
+            except Exception:
+                logger.warning("Failed to load corpus FAISS index")
 
     def _load_or_build(self, store_name: str, doc_dir: str) -> FAISS | None:
         index_path = Path(settings.faiss_index_dir) / store_name
@@ -115,6 +132,29 @@ class KnowledgeManager:
 
         return counts
 
+    def rebuild_corpus(self, chunks: list[Document]) -> int:
+        """Build corpus FAISS index from pre-chunked documents.
+
+        Args:
+            chunks: List of Document objects from the corpus pipeline.
+
+        Returns:
+            Number of chunks indexed.
+        """
+        assert self.embeddings is not None
+
+        if not chunks:
+            logger.info("No corpus chunks to index")
+            return 0
+
+        # Clear existing corpus index
+        corpus_index_path = Path(settings.faiss_index_dir) / "corpus"
+
+        self.corpus_store = FAISS.from_documents(chunks, self.embeddings)
+        self.corpus_store.save_local(str(corpus_index_path))
+        logger.info("Built corpus FAISS index: %d chunks", len(chunks))
+        return len(chunks)
+
     def search_terminology(self, query: str, k: int = 3) -> list[Document]:
         if self.terminology_store is None:
             return []
@@ -124,6 +164,12 @@ class KnowledgeManager:
         if self.design_doc_store is None:
             return []
         return self.design_doc_store.similarity_search(query, k=k)
+
+    def search_corpus(self, query: str, k: int = 20) -> list[Document]:
+        """Search corpus store, returning top-k candidates for reranking."""
+        if self.corpus_store is None:
+            return []
+        return self.corpus_store.similarity_search(query, k=k)
 
 
 # Singleton

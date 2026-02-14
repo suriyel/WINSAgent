@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 import uvicorn
@@ -16,8 +19,10 @@ async def lifespan(app: FastAPI):
     """Initialize resources on startup, clean up on shutdown."""
     # Startup: build knowledge vector stores if documents exist
     from app.knowledge.vector_store import knowledge_manager
+    from app.knowledge.glossary import glossary_manager
 
     knowledge_manager.initialize()
+    glossary_manager.reload()
     yield
     # Shutdown: nothing to clean up for InMemory stage
 
@@ -44,6 +49,7 @@ from app.api.params import router as params_router
 from app.api.knowledge_api import router as knowledge_router
 from app.api.tasks import router as tasks_router
 from app.api.tools_api import router as tools_router
+from app.api.corpus_api import router as corpus_router
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(hitl_router, prefix="/api")
@@ -52,6 +58,12 @@ app.include_router(conversations_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
+app.include_router(corpus_router, prefix="/api")
+
+# Static file serving for corpus images
+corpus_image_dir = Path(settings.corpus_image_dir)
+corpus_image_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/corpus/images", StaticFiles(directory=str(corpus_image_dir)), name="corpus_images")
 
 
 @app.get("/health")

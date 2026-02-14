@@ -4,9 +4,11 @@ interface Props {
   sidebar: React.ReactNode;
   main: React.ReactNode;
   panel: React.ReactNode;
+  corpusPanel?: React.ReactNode;
+  showCorpus?: boolean;
 }
 
-export default function WorkstationLayout({ sidebar, main, panel }: Props) {
+export default function WorkstationLayout({ sidebar, main, panel, corpusPanel, showCorpus }: Props) {
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}
@@ -32,9 +34,9 @@ export default function WorkstationLayout({ sidebar, main, panel }: Props) {
           {main}
         </main>
 
-        {/* Right panel */}
+        {/* Right panel — conditionally shows CorpusViewer or TaskPanel */}
         <aside className="w-72 border-l border-gray-100 bg-card overflow-y-auto shrink-0">
-          {panel}
+          {showCorpus && corpusPanel ? corpusPanel : panel}
         </aside>
       </div>
     </div>

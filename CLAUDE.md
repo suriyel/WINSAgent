@@ -105,7 +105,7 @@ Tools are registered in `backend/app/agent/tools/registry.py` with metadata:
 - `category`: `"query"` (no HITL) or `"mutation"` (typically requires HITL)
 - `param_edit_schema`: Optional JSON Schema for MissingParamsMiddleware forms
 
-Query tools: `match_scenario`, `query_root_cause_analysis`, `query_simulation_results`, `search_terminology`, `search_design_doc`
+Query tools: `match_scenario`, `query_root_cause_analysis`, `query_simulation_results`, `search_terminology`, `search_design_doc`, `search_corpus`
 
 ### Knowledge System
 Dual FAISS vector stores managed by `backend/app/knowledge/vector_store.py`:
@@ -113,6 +113,32 @@ Dual FAISS vector stores managed by `backend/app/knowledge/vector_store.py`:
 - `design_docs/` — Cell-level and grid-level analysis workflow documents
 
 Source markdown files live in `knowledge/`. Indexes persist to `backend/faiss_indexes/` and are rebuilt via `POST /api/knowledge/rebuild`. Uses `FakeEmbeddings` fallback when no LLM API key is configured.
+
+### Corpus System (`backend/app/knowledge/`)
+Full-pipeline corpus retrieval system for heterogeneous document ingestion and high-precision search:
+
+**Build Pipeline** (`pipeline.py`):
+- `corpus_source/` → Docling parses Word/PDF/PPT, Pandas parses Excel → `corpus_md/` (Markdown with image placeholders)
+- Semantic chunker (`chunker.py`) splits by Markdown heading structure with metadata
+- FAISS index built from chunks, stored as `faiss_indexes/corpus/`
+- Triggered via `POST /api/corpus/build`
+
+**Parsers** (`parsers/`):
+- `docling_parser.py` — Word/PDF/PPT → Markdown via Docling engine, extracts images to `corpus_md/images/`
+- `excel_parser.py` — Excel → Standard Markdown Table via Pandas (one MD per sheet)
+
+**High-Precision Retrieval**:
+- `search_corpus` tool: FAISS vector recall (top 20) → Remote Reranker API rerank → top 3
+- `reranker.py` — HTTP client for BGE-Reranker or compatible API, with glossary term boost
+- `glossary.py` — Expert terminology/synonym management loaded from JSON/CSV files in `corpus_md/glossary/`
+- Rejection logic: if reranker score < threshold (configurable), returns "未找到相关准确依据"
+
+**Frontend Corpus Viewer** (`frontend/src/components/corpus/`):
+- `CorpusViewer.tsx` — Paginated scroll viewer replacing right Panel on reference click
+- `CorpusChunk.tsx` — Chunk renderer with keyword highlighting and image display
+- `CorpusSidebar.tsx` — Heading navigation tree
+- `GlossaryManager.tsx` — Expert glossary upload/view/delete UI
+- `corpusStore.ts` — Zustand store for viewer state
 
 ### SSE Event Types
 Events streamed from backend (`backend/app/sse/event_mapper.py`) to frontend:
@@ -161,12 +187,21 @@ Three-column layout in `App.tsx`:
 | `backend/app/agent/subagents/agents/todo_tracker.py` | TODO tracker reactive sub-agent config |
 | `backend/app/api/chat.py` | Chat SSE endpoint |
 | `backend/app/sse/event_mapper.py` | Converts LangChain events to SSE frames |
-| `backend/app/knowledge/vector_store.py` | FAISS manager (dual-store) |
+| `backend/app/knowledge/vector_store.py` | FAISS manager (terminology + design_docs + corpus) |
+| `backend/app/knowledge/pipeline.py` | Corpus build pipeline orchestrator |
+| `backend/app/knowledge/reranker.py` | Remote Reranker API client |
+| `backend/app/knowledge/glossary.py` | Expert glossary/synonym manager |
+| `backend/app/knowledge/chunker.py` | Semantic Markdown chunker |
+| `backend/app/knowledge/parsers/docling_parser.py` | Docling-based document parser |
+| `backend/app/knowledge/parsers/excel_parser.py` | Excel to Markdown table parser |
+| `backend/app/api/corpus_api.py` | Corpus management API routes |
 | `backend/app/models/schemas.py` | Pydantic models for API request/response |
 | `backend/tests/conftest.py` | Pytest fixtures: mock/real settings, sample messages, markers |
 | `frontend/src/stores/chatStore.ts` | Zustand store (central state) |
 | `frontend/src/services/sse.ts` | SSE connection manager (fetch-based streaming) |
 | `frontend/src/design-tokens.ts` | Design system color/spacing tokens |
+| `frontend/src/stores/corpusStore.ts` | Zustand store for corpus viewer |
+| `frontend/src/components/corpus/CorpusViewer.tsx` | Corpus file viewer with pagination |
 
 ## API Endpoints
 
@@ -179,6 +214,14 @@ Three-column layout in `App.tsx`:
 | `/api/tasks/{id}/todos` | GET | Get TODO steps for task |
 | `/api/tools` | GET | List registered tools with metadata |
 | `/api/knowledge/rebuild` | POST | Rebuild FAISS indexes |
+| `/api/corpus/build` | POST | Trigger full corpus build pipeline |
+| `/api/corpus/status` | GET | Check corpus build status and index stats |
+| `/api/corpus/files` | GET | List parsed corpus Markdown files |
+| `/api/corpus/files/{id}` | GET | Get paginated chunks of a corpus file |
+| `/api/corpus/files/{id}/meta` | GET | Get file metadata and heading structure |
+| `/api/corpus/glossary` | GET | List glossary files and stats |
+| `/api/corpus/glossary/upload` | POST | Upload glossary file (JSON/CSV) |
+| `/api/corpus/glossary/{filename}` | DELETE | Delete a glossary file |
 | `/health` | GET | Health check |
 
 ## Configuration
@@ -193,6 +236,17 @@ Backend config in `backend/app/config.py` loaded from `.env`:
 - `SKILLS_DIR` — Path to Skill markdown files (default: `../Skills`)
 - `MYSQL_URL` — MySQL connection string (configured but not yet integrated)
 - `CORS_ORIGINS` — Allowed CORS origins (default: `http://localhost:3000,http://localhost:5173`)
+- `EMBEDDING_MODEL` — Embedding model name (default: `text-embedding-v3`)
+- `EMBEDDING_API_KEY` — Embedding API key (defaults to `LLM_API_KEY`)
+- `EMBEDDING_BASE_URL` — Embedding API URL (defaults to `LLM_BASE_URL`)
+- `RERANKER_MODEL` — Reranker model name (default: `bge-reranker-v2-m3`)
+- `RERANKER_BASE_URL` — Reranker API URL
+- `RERANKER_API_KEY` — Reranker API key
+- `RERANKER_THRESHOLD` — Score threshold for rejection (default: `0.3`)
+- `CORPUS_SOURCE_DIR` — Source document directory (default: `../corpus_source`)
+- `CORPUS_MD_DIR` — Parsed Markdown output directory (default: `../corpus_md`)
+- `CORPUS_IMAGE_DIR` — Extracted images directory (default: `../corpus_md/images`)
+- `CORPUS_GLOSSARY_DIR` — Glossary files directory (default: `../corpus_md/glossary`)
 
 ## Design System
 

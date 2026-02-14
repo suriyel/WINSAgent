@@ -1,11 +1,12 @@
 import type { Message } from "../../types";
-import { useState, lazy, Suspense } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
 import ThinkingIndicator from "./ThinkingIndicator";
 import DataTable from "./DataTable";
 import TodoStepper from "../todo/TodoStepper";
 import HITLInlineCard from "../hitl/HITLInlineCard";
 import ParamsInlineCard from "../hitl/ParamsInlineCard";
 import SuggestionChips from "./SuggestionChips";
+import { useCorpusStore } from "../../stores/corpusStore";
 
 const AutoChart = lazy(() => import("../chart/AutoChart"));
 
@@ -129,6 +130,54 @@ function renderToolResult(result: string) {
       })}
     </div>
   );
+}
+
+/** Render message content with clickable corpus reference links.
+ * Detects patterns like "引用ID: abc123#5" and makes them clickable. */
+function CorpusRefContent({ content }: { content: string }) {
+  const openCorpusViewer = useCorpusStore((s) => s.openCorpusViewer);
+
+  // Match corpus reference pattern: 引用ID: {file_id}#{chunk_index}
+  const refPattern = /引用ID:\s*([a-f0-9]+)#(\d+)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = refPattern.exec(content)) !== null) {
+    // Text before the match
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index));
+    }
+
+    const fileId = match[1];
+    const chunkIdx = parseInt(match[2], 10);
+
+    parts.push(
+      <button
+        key={`ref-${match.index}`}
+        onClick={() => openCorpusViewer(fileId, chunkIdx)}
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
+        title={`查看语料: ${fileId}#${chunkIdx}`}
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+        引用
+      </button>
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex));
+  }
+
+  // No refs found — return plain text
+  if (parts.length === 0) return <>{content}</>;
+
+  return <>{parts}</>;
 }
 
 export default function MessageBubble({ message }: Props) {
@@ -279,7 +328,7 @@ export default function MessageBubble({ message }: Props) {
             const displayContent = stripSuggestionsBlock(message.content);
             return displayContent ? (
               <div className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">
-                {displayContent}
+                <CorpusRefContent content={displayContent} />
               </div>
             ) : null;
           })()}

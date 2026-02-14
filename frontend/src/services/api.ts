@@ -193,6 +193,16 @@ export function submitParamsDecision(
   return controller;
 }
 
+export async function buildCorpus() {
+  const res = await fetch(`${BASE}/corpus/build`, { method: "POST" });
+  return res.json();
+}
+
+export async function getCorpusStatus() {
+  const res = await fetch(`${BASE}/corpus/status`);
+  return res.json();
+}
+
 export async function rebuildKnowledge(knowledgeType?: string) {
   const res = await fetch(`${BASE}/knowledge/rebuild`, {
     method: "POST",
