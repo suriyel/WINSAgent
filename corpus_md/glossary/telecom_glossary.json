@@ -1,0 +1,80 @@
+{
+  "terms": [
+    {
+      "term": "弱覆盖",
+      "definition": "无线网络信号强度不足，RSRP低于-110dBm的区域"
+    },
+    {
+      "term": "越区覆盖",
+      "definition": "小区信号超出预期范围延伸到其他小区服务区域"
+    },
+    {
+      "term": "盲区",
+      "definition": "完全没有信号的区域，通常发生在地下室、隧道等场景"
+    },
+    {
+      "term": "同频干扰",
+      "definition": "使用相同频率的邻区之间产生的相互干扰"
+    },
+    {
+      "term": "邻频干扰",
+      "definition": "使用相邻频率的小区之间产生的干扰"
+    },
+    {
+      "term": "互调干扰",
+      "definition": "多个信号在非线性器件中混合产生新频率成分的干扰"
+    },
+    {
+      "term": "外部干扰",
+      "definition": "来自本系统外的干扰源，如伪基站、大功率无线设备等"
+    },
+    {
+      "term": "PRB利用率",
+      "definition": "物理资源块占用率，反映小区负荷水平，超过80%认为存在容量瓶颈"
+    },
+    {
+      "term": "MIMO",
+      "definition": "多输入多输出技术，通过增加天线数量提升容量"
+    },
+    {
+      "term": "载波聚合",
+      "definition": "CA，将多个载波捆绑使用提升数据速率"
+    },
+    {
+      "term": "ICIC",
+      "definition": "小区间干扰协调技术，通过协调邻区资源使用降低干扰"
+    },
+    {
+      "term": "CoMP",
+      "definition": "多点协作传输技术，通过多小区联合处理提升边缘用户性能"
+    },
+    {
+      "term": "深度覆盖",
+      "definition": "建筑物内部的信号覆盖，穿透损耗是主要挑战"
+    },
+    {
+      "term": "室内分布系统",
+      "definition": "DAS，用于解决室内信号覆盖的分布式天线系统"
+    },
+    {
+      "term": "频谱重耕",
+      "definition": "将低效使用的频谱重新分配给新技术使用"
+    }
+  ],
+  "synonyms": {
+    "物理资源块": ["PRB", "Physical Resource Block"],
+    "参考信号接收功率": ["RSRP", "Reference Signal Received Power"],
+    "信噪比": ["SINR", "Signal to Interference plus Noise Ratio"],
+    "参考信号接收质量": ["RSRQ", "Reference Signal Received Quality"],
+    "每用户平均收入": ["ARPU", "Average Revenue Per User"],
+    "载波聚合": ["CA", "Carrier Aggregation"],
+    "分布式天线系统": ["DAS", "Distributed Antenna System"],
+    "小区间干扰协调": ["ICIC", "Inter-Cell Interference Coordination"],
+    "多点协作传输": ["CoMP", "Coordinated Multi-Point"],
+    "边缘计算": ["MEC", "Multi-Access Edge Computing"],
+    "频谱效率": ["SE", "Spectral Efficiency"],
+    "切换成功概率": ["切换成功率"],
+    "掉话概率": ["掉话率", "呼叫失败率"],
+    "吞吐量": ["数据速率", "网速", "传输速率"]
+  }
+}
